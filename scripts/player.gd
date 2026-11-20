@@ -42,6 +42,10 @@ var held_link := Transform3D.IDENTITY
 var held_rel := Basis.IDENTITY
 var hold_dist := 1.8
 var look_hit := {}
+var _held_r := 0.3
+## Bodies just let go of that still overlap the player: they keep ignoring the player's
+## capsule until they are clear, or they'd be shot out of it (possibly through a wall).
+var _releasing: Array = []
 
 var debug_input := Vector2.ZERO
 var debug_active := false
@@ -265,7 +269,10 @@ func _after_move(dt: float) -> void:
 			var push := -c.get_normal()
 			push.y = maxf(push.y, 0.0) * 0.3
 			var spd := clampf(Vector2(velocity.x, velocity.z).length(), 0.6, 7.0)
-			rb.apply_central_impulse(push * spd * clampf(rb.mass, 0.2, 6.0) * 0.08)
+			# scaled to game time, so high frame rates and slow motion don't kick harder
+			var k := clampf(dt * Engine.time_scale * 60.0, 0.0, 1.0)
+			if rb.linear_velocity.dot(push) < spd:
+				rb.apply_central_impulse(push * spd * clampf(rb.mass, 0.2, 6.0) * 0.08 * k)
 		elif o != null and o.has_meta("bounce") and c.get_normal().y > 0.7 and not bounced:
 			bounced = true
 			velocity.y = float(o.get_meta("bounce"))
@@ -284,6 +291,26 @@ func _after_move(dt: float) -> void:
 				step_accum = 0.0
 				if G.sfx:
 					G.sfx.play2d("step", -14.0 if crouching else -9.0, randf_range(0.85, 1.15))
+
+
+func _update_releasing() -> void:
+	if _releasing.is_empty():
+		return
+	var q := PhysicsShapeQueryParameters3D.new()
+	q.shape = shape
+	q.margin = 0.03
+	q.transform = Transform3D(Basis.IDENTITY, global_position + col.position)
+	q.collision_mask = G.PL_PROPS
+	q.exclude = [get_rid()]
+	var touching := {}
+	for h in get_world_3d().direct_space_state.intersect_shape(q, 32):
+		touching[h.rid] = true
+	for b in _releasing.duplicate():
+		if not is_instance_valid(b) or b == held:
+			_releasing.erase(b)
+		elif not touching.has(b.get_rid()):
+			b.remove_collision_exception_with(self)
+			_releasing.erase(b)
 
 
 func _update_crouch(dt: float, active: bool) -> void:
@@ -440,6 +467,8 @@ func try_grab() -> void:
 		return
 	if c is RigidBody3D and c.is_in_group("grabbable"):
 		held = c
+		_releasing.erase(c)
+		_held_r = G.portal_manager.body_radius(held)
 		held_link = look_hit.link
 		var ct: Transform3D = held_link * camera.global_transform
 		held_rel = (ct.basis.inverse() * held.global_transform.basis).orthonormalized()
@@ -456,7 +485,7 @@ func try_grab() -> void:
 
 func drop() -> void:
 	if held and is_instance_valid(held):
-		held.remove_collision_exception_with(self)
+		_releasing.append(held)
 		held.angular_velocity *= 0.3
 	held = null
 	held_link = Transform3D.IDENTITY
@@ -513,28 +542,81 @@ func delete_target() -> void:
 func spawn(kind: String) -> void:
 	if G.portal_manager == null or G.world == null:
 		return
+	var prop := Props.make(kind)
+	var rad: float = G.portal_manager.body_radius(prop)
 	var r: Dictionary = G.portal_manager.portal_raycast(camera.global_position, -camera.global_transform.basis.z, 2.0, G.PL_WORLD | G.PL_PROPS | G.PL_GLASS, [get_rid()])
 	var dir: Vector3 = r.dir
-	var p: Vector3 = r.position
-	if r.hit:
-		p = p - dir * 0.45 + (r.normal as Vector3) * 0.15
 	var link: Transform3D = r.link
+	# off the surface you're looking at by the prop's own size, not just back along the ray
+	var p: Vector3 = (r.position as Vector3) + (r.normal as Vector3) * (rad + 0.05) if r.hit else (r.position as Vector3) - dir * rad
+	var spots := [p]
+	if r.exit != null:
+		# don't leave it behind (inside the frame of) the portal it was spawned through
+		var sd: float = r.exit.signed_dist(p)
+		if sd < rad:
+			spots[0] = p + r.exit.normal() * (rad - sd + 0.02)
+	elif Vector2(p.x - global_position.x, p.z - global_position.z).length() < RADIUS + rad + 0.05:
+		# that would be inside you (looking at your feet, or at a wall you're touching):
+		# try in front of you, behind you, beside you, then over your head
+		var h := Vector2(dir.x, dir.z)
+		if h.length() < 0.01:
+			h = Vector2(-sin(yaw), -cos(yaw))
+		h = h.normalized() * (RADIUS + rad + 0.05)
+		var y := maxf(p.y, global_position.y + rad + 0.02)
+		spots = []
+		for v in [h, -h, Vector2(h.y, -h.x), Vector2(-h.y, h.x)]:
+			spots.append(Vector3(global_position.x + v.x, y, global_position.z + v.y))
+		spots.append(global_position + Vector3.UP * (cur_h + rad + 0.05))
+	var spot = null
+	var first := true
+	for c in spots:
+		spot = _free_prop_spot(c, rad)
+		if spot != null:
+			break
+		first = false
+	if spot == null:
+		prop.free()
+		return
+	p = spot
 	var basis: Basis = (link.basis * Basis(Vector3.UP, yaw)).orthonormalized()
-	var prop := Props.make(kind)
 	G.world.add_spawned(prop, Transform3D(basis, p))
-	prop.linear_velocity = dir * 1.5
+	if first:
+		prop.linear_velocity = dir * 1.5
 	if G.sfx:
 		G.sfx.play_at("pop", p, -4.0, randf_range(0.9, 1.2))
 
 
+## `p`, or the nearest spot up to a metre above it, where a ball of radius `rad` touches
+## neither the level nor the player; null if there is none.
+func _free_prop_spot(p: Vector3, rad: float):
+	var space := get_world_3d().direct_space_state
+	var q := PhysicsShapeQueryParameters3D.new()
+	var ball := SphereShape3D.new()
+	ball.radius = rad * 0.85
+	q.shape = ball
+	q.collision_mask = G.PL_WORLD | G.PL_GLASS | G.PL_PLAYER
+	for k in 11:
+		q.transform = Transform3D(Basis.IDENTITY, p + Vector3.UP * (0.1 * k))
+		if space.intersect_shape(q, 1).is_empty():
+			return q.transform.origin
+	return null
+
+
 func _physics_process(dt: float) -> void:
+	_update_releasing()
 	if held == null:
 		return
 	if not is_instance_valid(held) or not held.is_inside_tree():
 		held = null
 		return
 	var ct: Transform3D = held_link * camera.global_transform
-	var tgt := ct.origin - ct.basis.z * hold_dist
+	# Keep the hold point in front of whatever you're looking at (through portals too), so
+	# standing close to a wall never drags the held thing into or through it.
+	var dist := hold_dist
+	var r: Dictionary = G.portal_manager.portal_raycast(camera.global_position, -camera.global_transform.basis.z, hold_dist + _held_r + 0.05, G.PL_WORLD | G.PL_GLASS, [get_rid(), held.get_rid()])
+	if r.hit and (r.link as Transform3D).is_equal_approx(held_link):
+		dist = minf(dist, maxf(float(r.distance) - _held_r - 0.05, 0.0))
+	var tgt := ct.origin - ct.basis.z * dist
 	var diff := tgt - held.global_position
 	if diff.length() > 3.0:
 		drop()

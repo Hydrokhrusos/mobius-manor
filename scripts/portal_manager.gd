@@ -294,7 +294,8 @@ func _set_clip(root: Node, plane: Vector4) -> void:
 			_set_clip(c, plane)
 
 
-func _body_radius(rb: RigidBody3D) -> float:
+## Radius of a sphere around the body's centre that contains all of its meshes.
+func body_radius(rb: RigidBody3D) -> float:
 	if rb.has_meta("portal_r"):
 		return rb.get_meta("portal_r")
 	var r := 0.2
@@ -323,7 +324,7 @@ func _update_clones() -> void:
 				clip_now[bid] = _clipped[bid]
 			continue
 		var pos := rb.global_position
-		var r := _body_radius(rb)
+		var r := body_radius(rb)
 		for i in portals.size():
 			var p = portals[i]
 			if not p.can_teleport or p.target == null:
@@ -590,8 +591,30 @@ func teleport_body(rb: RigidBody3D, p) -> void:
 		G.player.held_link = L * G.player.held_link
 	if p.on_teleport.is_valid():
 		p.on_teleport.call(rb)
+	_unstick(rb, p.target)
 	if G.world:
 		G.world.update_body_layers(rb)
+
+
+## A body that comes out of a portal into something solid (out of the painting, into the
+## console table under it) is moved clear along the exit normal, instead of being shot out
+## by the physics engine's depenetration, which can send it through a wall.
+func _unstick(rb: RigidBody3D, exit) -> void:
+	var kc := KinematicCollision3D.new()
+	if not rb.test_move(rb.global_transform, Vector3.ZERO, kc, 0.001, true) or kc.get_depth() < 0.03:
+		return
+	var n: Vector3 = exit.normal()
+	for k in range(1, 31):
+		var t := rb.global_transform.translated(n * (0.02 * k))
+		if not rb.test_move(t, Vector3.ZERO, kc, 0.001, true) or kc.get_depth() < 0.01:
+			rb.global_transform = t
+			return
+
+
+## Forget where a body was last tick (after it was moved by hand), so the jump is not
+## mistaken for walking through a portal.
+func reset_body(rb: RigidBody3D) -> void:
+	_prev_pos.erase(rb.get_instance_id())
 
 
 # --- Raycasts through portals ---------------------------------------------------------
@@ -603,6 +626,7 @@ func portal_raycast(from: Vector3, dir: Vector3, max_len: float, mask: int, excl
 	var remaining := max_len
 	var link := Transform3D.IDENTITY
 	var travelled := 0.0
+	var exit = null
 	for i in 4:
 		var q := PhysicsRayQueryParameters3D.create(o, o + d * remaining, mask, exclude)
 		var hit := space.intersect_ray(q)
@@ -625,6 +649,7 @@ func portal_raycast(from: Vector3, dir: Vector3, max_len: float, mask: int, excl
 			remaining -= bt
 			travelled += bt
 			link = L * link
+			exit = bp.target
 			o += d * 0.002
 			continue
 		return {
@@ -634,6 +659,7 @@ func portal_raycast(from: Vector3, dir: Vector3, max_len: float, mask: int, excl
 			"normal": hit.get("normal", Vector3.ZERO),
 			"dir": d,
 			"link": link,
+			"exit": exit,
 			"distance": travelled + hit_t,
 		}
-	return {"hit": false, "collider": null, "position": o, "normal": Vector3.ZERO, "dir": d, "link": link, "distance": max_len}
+	return {"hit": false, "collider": null, "position": o, "normal": Vector3.ZERO, "dir": d, "link": link, "exit": exit, "distance": max_len}

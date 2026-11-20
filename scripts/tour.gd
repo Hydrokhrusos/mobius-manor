@@ -56,6 +56,10 @@ func _run() -> void:
 		await _walk_seam_test()
 		get_tree().quit()
 		return
+	if only == "oob":
+		await _oob_test()
+		get_tree().quit()
+		return
 	G.hud.start_game(false)
 	G.player.debug_active = true
 	await _frames(20)
@@ -329,6 +333,126 @@ func _walk_seam_test() -> void:
 	G.player.flashlight.visible = false
 	worst.sort_custom(func(x, y): return x[0] > y[0])
 	print("WALKSEAM SUMMARY cases=%d mean over8 above the no-teleport step=%.3f%% worst=%s" % [count, total / maxf(count, 1) * 100.0, str(worst.slice(0, 6))])
+
+
+## Tries to get props out of the house: holding them against walls, throwing them hard at
+## walls, glass, floor and ceiling, and spawning them while hugging a wall.
+var _oob_bad := 0
+var _oob_total := 0
+
+
+func _oob_test() -> void:
+	G.hud.start_game(false)
+	G.player.debug_active = true
+	G.world.set("oob_recovery", false)
+	await _frames(20)
+	var bed := func(b: Vector3) -> bool: return b.x < 11.45 and b.y > -0.1 and b.y < 3.05 and absf(b.z) < 3.55
+	var hall := func(b: Vector3) -> bool: return b.x < 6.06 and b.y > -0.1 and b.y < 3.05
+	var foyer := func(b: Vector3) -> bool: return b.x > -4.06 and b.y > -0.1
+	var gh := func(b: Vector3) -> bool: return b.z < 1077.15 and absf(b.x) < 7.15 and b.y < 4.55 and b.y > -0.1
+	var great := func(b: Vector3) -> bool: return b.y > -0.1
+	var attic := func(b: Vector3) -> bool: return G.world.area_at(b) == "The Attic" and b.y < 4.1
+	# holding things against a wall while waving them about
+	for k in ["domino", "book", "duck", "cube", "pin", "lamp", "crate", "chair", "beach_ball", "music_box", "ball"]:
+		await _oob_hold(k, Vector3(9.6, 0.001, 2.0), -PI * 0.5, bed)
+	# throwing hard
+	for k in ["domino", "book", "duck", "cube", "pin", "music_box", "crate"]:
+		for d in [0.35, 0.9]:
+			for pt in [0.0, 0.45, -0.9]:
+				await _oob_throw(k, Vector3(11.4 - 0.3 - d, 0.001, 1.5), -PI * 0.5, pt, bed, "bedroom wall d=%.2f pitch=%.2f" % [d, pt])
+		await _oob_throw(k, Vector3(2.0, 0.001, 1077.1 - 0.65), 0.0 + PI, 0.1, gh, "greenhouse glass")
+		await _oob_throw(k, Vector3(0.0, 0.001, 1069.0), PI, 1.35, gh, "greenhouse roof")
+		await _oob_throw(k, Vector3(6.0 - 0.65, 0.001, -5.9), -PI * 0.5, 0.0, hall, "hallway window")
+		await _oob_throw(k, Vector3(-3.0, 0.001, 0.0), PI * 0.5, 0.25, foyer, "foyer painting")
+		await _oob_throw(k, Vector3(66.0, 0.001, -4.0), 0.0, -1.45, great, "great hall floor")
+		await _oob_throw(k, Vector3(0.0, 0.001, -61.8), 0.0, 1.35, attic, "attic skylight")
+	# spawning while hugging a wall
+	for pt in [0.0, -0.75, -1.45]:
+		for k in Player.SPAWN_KINDS:
+			await _oob_spawn(k, Vector3(11.4 - 0.31, 0.001, 1.5), -PI * 0.5, pt, bed)
+	print("OOB SUMMARY escaped %d / %d" % [_oob_bad, _oob_total])
+
+
+func _oob_grab(kind: String, foot: Vector3, yaw: float) -> Prop:
+	G.player.place(foot, yaw, 0.0)
+	await _frames(3)
+	var cam: Camera3D = G.player.camera
+	var b := Props.make(kind)
+	G.world.add_spawned(b, Transform3D(Basis(Vector3.UP, yaw), cam.global_position - cam.global_transform.basis.z * 1.2))
+	b.gravity_scale = 0.0
+	await _frames(3)
+	G.player.try_grab()
+	b.gravity_scale = 1.0
+	if G.player.held != b:
+		print("OOB could not grab %s" % kind)
+		b.queue_free()
+		return null
+	return b
+
+
+func _oob_check(b: Prop, inside: Callable, what: String) -> void:
+	_oob_total += 1
+	var ok: bool = is_instance_valid(b) and b.is_inside_tree() and inside.call(b.global_position)
+	if not ok:
+		_oob_bad += 1
+		print("OOB ESCAPED %s -> %s" % [what, b.global_position if is_instance_valid(b) else "deleted"])
+	if is_instance_valid(b):
+		if G.player.held == b:
+			G.player.drop()
+		b.queue_free()
+
+
+func _oob_hold(kind: String, foot: Vector3, yaw: float, inside: Callable) -> void:
+	var b = await _oob_grab(kind, foot, yaw)
+	if b == null:
+		return
+	G.player.hold_dist = 3.0
+	G.player.debug_input = Vector2(0, -1)
+	await get_tree().create_timer(0.7).timeout
+	var t := 0.0
+	while t < 2.0:
+		await get_tree().process_frame
+		t += get_process_delta_time()
+		G.player.pitch = -1.3 + 1.9 * (0.5 + 0.5 * sin(t * 5.0))
+		G.player.yaw = yaw + 0.7 * sin(t * 3.3)
+		G.player._apply_rot()
+		if t > 1.0:
+			Input.action_press("crouch")
+	Input.action_release("crouch")
+	G.player.debug_input = Vector2.ZERO
+	G.player.drop()
+	await get_tree().create_timer(1.0).timeout
+	_oob_check(b, inside, "holding %s against a wall" % kind)
+
+
+func _oob_throw(kind: String, foot: Vector3, yaw: float, pitch: float, inside: Callable, what: String) -> void:
+	var fwd := Vector3(-sin(yaw), 0.0, -cos(yaw))
+	var b = await _oob_grab(kind, foot - fwd * 1.5, yaw)
+	if b == null:
+		return
+	G.player.hold_dist = 1.0
+	G.player.global_position = foot
+	G.player.pitch = pitch
+	G.player._apply_rot()
+	await _frames(12)
+	if G.player.held == b:
+		G.player.throw_held()
+	await get_tree().create_timer(1.3).timeout
+	_oob_check(b, inside, "throwing %s at %s" % [kind, what])
+
+
+func _oob_spawn(kind: String, foot: Vector3, yaw: float, pitch: float, inside: Callable) -> void:
+	G.player.place(foot, yaw, pitch)
+	await _frames(3)
+	var before: int = G.world.spawned_root.get_child_count()
+	G.player.spawn(kind)
+	var kids: Array = G.world.spawned_root.get_children()
+	if kids.size() == before:
+		print("OOB spawn refused: %s hugging a wall, pitch %.2f" % [kind, pitch])
+		return
+	var b: Prop = kids[kids.size() - 1]
+	await get_tree().create_timer(1.0).timeout
+	_oob_check(b, inside, "spawning %s hugging a wall, pitch %.2f" % [kind, pitch])
 
 
 ## Falls through the attic trapdoor and measures how far the camera jumps (in the

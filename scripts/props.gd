@@ -262,6 +262,9 @@ static func make(kind: String, color: Variant = null) -> Prop:
 			_shape(b, _boxs(Vector3(0.3, 0.3, 0.3)))
 	b.collision_layer = G.PL_PROPS
 	b.collision_mask = G.PL_WORLD | G.PL_PROPS | G.PL_PLAYER | G.PL_GLASS
+	# Walls are only 0.2 m thick: without continuous collision, anything thrown hard (or
+	# shoved by the hold spring) can skip straight through them in one physics step.
+	b.continuous_cd = true
 	b.angular_damp = 0.4
 	b.add_to_group("travelers")
 	b.add_to_group("props")

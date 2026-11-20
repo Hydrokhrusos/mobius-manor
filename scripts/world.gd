@@ -3,6 +3,9 @@ extends Node3D
 ## Builds the whole house procedurally: rooms, impossible connections, furniture and toys.
 
 const T := 0.2
+## Collision boxes behind glass, windows and the painting are this thick, so a prop
+## thrown hard can't get through them.
+const BLOCK_T := 0.4
 # The repeating room sees itself through its own doors (one copy every 6 m). Portal views
 # go 3 levels deep, so the 4th copy (18 m) is never drawn: the fade must be complete by
 # then, or stepping through a door would make the far end of the corridor pop.
@@ -23,6 +26,9 @@ var _body: StaticBody3D
 var _layers := 1
 var _off := Vector3.ZERO
 var _cleanup_t := 0.0
+## Props that end up outside every room are put back where they started (the debug tour
+## turns this off to check that nothing gets out in the first place).
+var oob_recovery := true
 
 
 func build() -> void:
@@ -50,13 +56,28 @@ func _process(delta: float) -> void:
 	if G.player.global_position.y < -40.0:
 		G.player.place(spawn_pos, spawn_yaw)
 	_cleanup_t += delta
-	if _cleanup_t > 1.0:
+	if _cleanup_t > 0.5 and oob_recovery:
 		_cleanup_t = 0.0
 		for b in get_tree().get_nodes_in_group("props"):
-			if b.global_position.y < -60.0:
-				if G.player.held == b:
-					G.player.drop()
-				b.queue_free()
+			var rb := b as RigidBody3D
+			if rb != null and not rb.sleeping and area_at(rb.global_position) == "":
+				_return_prop(rb)
+
+
+## Something got out of the house after all: put it back where it started, or remove it
+## if it was spawned. Ducks always come back, so all of them can still be found.
+func _return_prop(rb: RigidBody3D) -> void:
+	if G.player.held == rb:
+		G.player.drop()
+	if not rb.has_meta("home"):
+		rb.queue_free()
+		return
+	rb.global_transform = rb.get_meta("home")
+	rb.linear_velocity = Vector3.ZERO
+	rb.angular_velocity = Vector3.ZERO
+	if G.portal_manager:
+		G.portal_manager.reset_body(rb)
+	update_body_layers(rb)
 
 
 func area_at(p: Vector3) -> String:
@@ -274,10 +295,18 @@ func blocker(c: Vector3, s: Vector3) -> void:
 	cbox(c, s, Basis.IDENTITY, sb)
 
 
-func glass_pane(c: Vector3, s: Vector3, collide := true) -> void:
+## A pane of glass. `out` points away from the room; the collision box is then BLOCK_T
+## thick on that side of the glass.
+func glass_pane(c: Vector3, s: Vector3, collide := true, out := Vector3.ZERO) -> void:
 	box(c, s, M.glass, false, false)
 	if collide:
-		blocker(c, s.max(Vector3(0.06, 0.06, 0.06)))
+		var bs := s.max(Vector3(0.06, 0.06, 0.06))
+		var bc := c
+		if out != Vector3.ZERO:
+			var a := out.abs()
+			bs = bs * (Vector3.ONE - a) + a * BLOCK_T
+			bc = c + out * (BLOCK_T * 0.5 - s.dot(a) * 0.5)
+		blocker(bc, bs)
 
 
 func make_portal(pname: String, center: Vector3, normal: Vector3, up: Vector3, sz: Vector2, fallback := Color(0.03, 0.03, 0.035), fade := Vector2(40.0, 60.0)) -> Portal:
@@ -502,6 +531,7 @@ func prop(kind: String, pos: Vector3, yaw := 0.0, color: Variant = null, sleep :
 	var b := Props.make(kind, color)
 	props_root.add_child(b)
 	b.global_transform = Transform3D(Basis(Vector3.UP, yaw), pos + _off)
+	b.set_meta("home", b.global_transform)
 	if sleep:
 		b.sleeping = true
 	update_body_layers(b)
@@ -512,6 +542,7 @@ func prop_xf(kind: String, xf: Transform3D, color: Variant = null) -> Prop:
 	var b := Props.make(kind, color)
 	props_root.add_child(b)
 	b.global_transform = xf.translated(_off)
+	b.set_meta("home", b.global_transform)
 	b.sleeping = true
 	update_body_layers(b)
 	return b
@@ -554,7 +585,7 @@ func _build_foyer() -> void:
 	var pt := portal_for("w", mn, mx, o_w, "Painting")
 	pt.can_teleport = false
 	frame_around("w", mn, mx, o_w, M.gold, 0.16, 0.08)
-	blocker(Vector3(-4.13, 2.0, 0.0), Vector3(0.14, 2.0, 1.6))
+	blocker(Vector3(-4.07 - BLOCK_T * 0.5, 2.0, 0.0), Vector3(BLOCK_T, 2.0, 1.6))
 	# console table under the painting
 	box(Vector3(-3.72, 0.775, 0.0), Vector3(0.5, 0.05, 1.7), M.dark_wood)
 	for z in [-0.78, 0.78]:
@@ -633,7 +664,7 @@ func _build_hallway() -> void:
 	var win := portal_for("e", mn, mx, o_e, "HallWindow")
 	win.can_teleport = false
 	glass_pane(Vector3(6.004, 1.6, -5.9), Vector3(0.006, 1.6, 1.4), false)
-	blocker(Vector3(6.13, 1.6, -5.9), Vector3(0.12, 1.6, 1.4))
+	blocker(Vector3(6.07 + BLOCK_T * 0.5, 1.6, -5.9), Vector3(BLOCK_T, 1.6, 1.4))
 	box(Vector3(5.99, 1.6, -5.9), Vector3(0.03, 1.6, 0.04), M.wood_trim, false, false)
 	box(Vector3(5.99, 1.6, -5.9), Vector3(0.03, 0.04, 1.4), M.wood_trim, false, false)
 	for x in [-9.0, -3.0, 3.0]:
@@ -951,6 +982,9 @@ func _roof_slope(lo: Vector3, hi: Vector3) -> void:
 	var b := lo.lerp(hi, 0.8)
 	slab(Vector3(0, lo_x.y, lo_x.z), Vector3(0, a.y, a.z), 1.5, 0.15, true, mat)
 	slab(Vector3(0, b.y, b.z), Vector3(0, hi_x.y, hi_x.z), 1.5, 0.15, true, mat)
+	# glass in the skylight, so nothing (and nobody, in low gravity) leaves through it
+	slab(Vector3(0, a.y, a.z), Vector3(0, b.y, b.z), 1.5, 0.01, true, M.glass, true, false)
+	slab(Vector3(0, a.y, a.z), Vector3(0, b.y, b.z), 1.5, BLOCK_T, true, null, false, true)
 	for sx in [-0.79, 0.79]:
 		slab(Vector3(sx, a.y, a.z), Vector3(sx, b.y, b.z), 0.08, 0.16, false, M.beam, true, false)
 	var mid := (a + b) * 0.5
@@ -980,7 +1014,7 @@ func _build_great_hall() -> void:
 	var ghw := portal_for("e", mn, mx, o_e, "HallHighWindow")
 	ghw.can_teleport = false
 	glass_pane(Vector3(84.996, 7.8, 0.0), Vector3(0.006, 1.6, 1.4), false)
-	blocker(Vector3(85.13, 7.8, 0.0), Vector3(0.12, 1.6, 1.4))
+	blocker(Vector3(85.07 + BLOCK_T * 0.5, 7.8, 0.0), Vector3(BLOCK_T, 1.6, 1.4))
 	box(Vector3(84.99, 7.8, 0.0), Vector3(0.03, 1.6, 0.04), M.wood_trim, false, false)
 	box(Vector3(84.99, 7.8, 0.0), Vector3(0.03, 0.04, 1.4), M.wood_trim, false, false)
 	# free-standing door frame in the middle of the hall
@@ -1141,6 +1175,7 @@ func _seesaw(c: Vector3) -> void:
 	var plank := Props.make("plank")
 	props_root.add_child(plank)
 	plank.global_position = c + Vector3(0, 0.56, 0) + _off
+	plank.set_meta("home", plank.global_transform)
 	var j := HingeJoint3D.new()
 	_area_node.add_child(j)
 	j.position = c + Vector3(0, 0.51, 0)
@@ -1168,13 +1203,13 @@ func _build_greenhouse() -> void:
 	box(Vector3(-7.1, knee * 0.5, 70.0), Vector3(0.2, knee, 14.0), M.brick)
 	box(Vector3(7.1, knee * 0.5, 70.0), Vector3(0.2, knee, 14.0), M.brick)
 	var gh := H - knee
-	glass_pane(Vector3(-3.925, knee + gh * 0.5, 62.9), Vector3(6.55, gh, 0.02))
-	glass_pane(Vector3(3.925, knee + gh * 0.5, 62.9), Vector3(6.55, gh, 0.02))
-	glass_pane(Vector3(0.0, (2.3 + H) * 0.5, 62.9), Vector3(1.3, H - 2.3, 0.02))
-	glass_pane(Vector3(0.0, knee + gh * 0.5, 77.1), Vector3(14.4, gh, 0.02))
-	glass_pane(Vector3(-7.1, knee + gh * 0.5, 70.0), Vector3(0.02, gh, 14.0))
-	glass_pane(Vector3(7.1, knee + gh * 0.5, 70.0), Vector3(0.02, gh, 14.0))
-	glass_pane(Vector3(0.0, H + 0.01, 70.0), Vector3(14.4, 0.02, 14.4))
+	glass_pane(Vector3(-3.925, knee + gh * 0.5, 62.9), Vector3(6.55, gh, 0.02), true, Vector3.FORWARD)
+	glass_pane(Vector3(3.925, knee + gh * 0.5, 62.9), Vector3(6.55, gh, 0.02), true, Vector3.FORWARD)
+	glass_pane(Vector3(0.0, (2.3 + H) * 0.5, 62.9), Vector3(1.3, H - 2.3, 0.02), true, Vector3.FORWARD)
+	glass_pane(Vector3(0.0, knee + gh * 0.5, 77.1), Vector3(14.4, gh, 0.02), true, Vector3.BACK)
+	glass_pane(Vector3(-7.1, knee + gh * 0.5, 70.0), Vector3(0.02, gh, 14.0), true, Vector3.LEFT)
+	glass_pane(Vector3(7.1, knee + gh * 0.5, 70.0), Vector3(0.02, gh, 14.0), true, Vector3.RIGHT)
+	glass_pane(Vector3(0.0, H + 0.01, 70.0), Vector3(14.4, 0.02, 14.4), true, Vector3.UP)
 	var fw: Material = M.frame_white
 	for i in 11:
 		var u := -7.0 + i * 1.4

@@ -65,7 +65,8 @@ scripts/props.gd/prop.gd   physics toys
 scripts/hud.gd             title screen, prompts, pause menu
 scripts/sfx.gd             synthesised sound effects and music box
 scripts/tour.gd            debug screenshot tour / automated checks (`-- --tour --shots=<dir>`;
-                           `--only=seam` / `--only=walkseam` compare the frames either side of each teleport)
+                           `--only=seam` / `--only=walkseam` compare the frames either side of each teleport,
+                           `--only=oob` tries to get props out of the house by holding, throwing and spawning)
 shaders/                   procedural world shader, portal, glass, water
 ```
 
