@@ -40,14 +40,18 @@ Find the 8 rubber ducks hidden around the house.
 
 ## How the portals work
 
-* Each portal is a rectangle; a pool of `SubViewport`s renders the view through the portals you can see
-  (plus a second level for portals seen through portals). Portal surfaces sample that view in screen space.
+* Each portal is a rectangle; a pool of `SubViewport`s renders the view through the portals you can see,
+  handed out best-first by screen coverage, up to three levels deep (portals seen through portals seen
+  through portals). Portal surfaces sample that view in screen space, and a portal seen by several
+  cameras gets one view per camera. Views fade with distance the same way at every level, so stepping
+  through a portal never changes what you see.
 * Instead of an oblique near plane, every material's shader discards fragments behind the *exit* portal.
   Each portal camera encodes its slot id in cull-mask bits 8–19 (`CAMERA_VISIBLE_LAYERS`), and the clip
   planes live in a small global float texture (`shaders/portal_common.gdshaderinc`).
 * Portal views are rendered in linear HDR and tonemapped once by the main camera, so colours match exactly.
 * The player and physics props teleport when they cross a portal plane; held objects keep being held
-  through portals, and props half-way through a doorway get a visual clone on the other side.
+  through portals. Props and the player's own body half-way through a doorway get a copy on the other
+  side, cut at the portal plane. Looping sounds and the flashlight also carry through portals.
 
 ## Project layout
 
@@ -60,7 +64,8 @@ scripts/player.gd          first-person controller, grabbing, spawning
 scripts/props.gd/prop.gd   physics toys
 scripts/hud.gd             title screen, prompts, pause menu
 scripts/sfx.gd             synthesised sound effects and music box
-scripts/tour.gd            debug screenshot tour / automated checks (`-- --tour --shots=<dir>`)
+scripts/tour.gd            debug screenshot tour / automated checks (`-- --tour --shots=<dir>`;
+                           `--only=seam` / `--only=walkseam` compare the frames either side of each teleport)
 shaders/                   procedural world shader, portal, glass, water
 ```
 

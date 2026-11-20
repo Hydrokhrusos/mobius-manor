@@ -241,6 +241,7 @@ static func make(kind: String, color: Variant = null) -> Prop:
 			b.audio.unit_size = 2.5
 			b.audio.max_distance = 18.0
 			b.audio.volume_db = -6.0
+			b.audio.add_to_group("portal_audio")
 			b.add_child(b.audio)
 			b.mass = 1.0
 			b.prompt = "Wind music box"

@@ -6,21 +6,24 @@ extends Node3D
 
 const PORTAL_SHADER := preload("res://shaders/portal.gdshader")
 const MARGIN := 0.04
+const INNER_INSET := 0.002
+const MAX_VIEWS := 4
+const VIEW_UNIFORMS := ["view0", "view1", "view2", "view3"]
 
 var size := Vector2(1.2, 2.2)
 var target: Portal = null
 var can_teleport := true
 var can_render := true
-var no_l2 := false
-var cam_layers: int = 1 | 2 | 4 | 64
+var cam_layers: int = 1 | 2 | 4 | 16 | 64
 var fallback := Color(0.03, 0.03, 0.035)
-var fade := Vector2(8.0, 18.0)
+var fade := Vector2(40.0, 60.0)
 var on_teleport: Callable = Callable()
 
 var mat: ShaderMaterial
 var quad: MeshInstance3D
 var inner: MeshInstance3D
-var l2_assigned := false
+var view_count := 0
+var _view_parent := Vector4i(-1, -1, -1, -1)
 
 var _xf := Transform3D.IDENTITY
 var _inv := Transform3D.IDENTITY
@@ -31,8 +34,8 @@ func setup_visual() -> void:
 	mat = ShaderMaterial.new()
 	mat.shader = PORTAL_SHADER
 	mat.set_shader_parameter("fallback_color", Vector3(fallback.r, fallback.g, fallback.b))
-	mat.set_shader_parameter("l2_fade_start", fade.x)
-	mat.set_shader_parameter("l2_fade_end", fade.y)
+	mat.set_shader_parameter("fade_start", fade.x)
+	mat.set_shader_parameter("fade_end", fade.y)
 	var q := QuadMesh.new()
 	q.size = size + Vector2(MARGIN, MARGIN) * 2.0
 	quad = MeshInstance3D.new()
@@ -40,8 +43,9 @@ func setup_visual() -> void:
 	quad.material_override = mat
 	quad.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(quad)
+	# Slightly narrower than the opening so the door jambs never poke in front of it.
 	var b := BoxMesh.new()
-	b.size = Vector3(size.x + MARGIN * 2.0, size.y + MARGIN * 2.0, 1.0)
+	b.size = Vector3(size.x - INNER_INSET * 2.0, size.y - INNER_INSET * 2.0, 1.0)
 	b.flip_faces = true
 	inner = MeshInstance3D.new()
 	inner.mesh = b
@@ -52,6 +56,25 @@ func setup_visual() -> void:
 	refresh_xf()
 	if not can_render:
 		quad.visible = false
+
+
+## Forget last frame's views (called by the PortalManager before assigning new ones).
+func clear_views() -> void:
+	view_count = 0
+	if _view_parent != Vector4i(-1, -1, -1, -1):
+		_view_parent = Vector4i(-1, -1, -1, -1)
+		if mat:
+			mat.set_shader_parameter("view_parent", _view_parent)
+
+
+## Show `tex` on this portal when it is drawn by the camera with id `parent_id`.
+func add_view(parent_id: int, tex: Texture2D) -> void:
+	if view_count >= MAX_VIEWS or mat == null:
+		return
+	mat.set_shader_parameter(VIEW_UNIFORMS[view_count], tex)
+	_view_parent[view_count] = parent_id
+	view_count += 1
+	mat.set_shader_parameter("view_parent", _view_parent)
 
 
 func refresh_xf() -> void:
@@ -73,10 +96,12 @@ func set_depth(d: float) -> void:
 
 
 ## Extend a box behind the surface while the camera is about to pass through, so the
-## camera's near plane never clips the portal surface.
+## camera's near plane never clips the portal surface. Only from the front: the camera is
+## teleported the moment it crosses, so being behind means this portal is not ours (e.g.
+## the back of a free-standing frame), and a box there would swallow the camera.
 func near_update(cam_pos: Vector3) -> void:
 	var lp := _inv * cam_pos
-	if lp.z > -0.02 and lp.z < 0.6 and absf(lp.x) < size.x * 0.5 + 0.3 and absf(lp.y) < size.y * 0.5 + 0.3:
+	if lp.z >= 0.0 and lp.z < 0.6 and absf(lp.x) < size.x * 0.5 + 0.3 and absf(lp.y) < size.y * 0.5 + 0.3:
 		set_depth(0.35)
 	else:
 		set_depth(0.0)

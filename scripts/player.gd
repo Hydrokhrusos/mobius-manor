@@ -32,6 +32,10 @@ var jump_buffer := 0.0
 var step_accum := 0.0
 var was_on_floor := true
 var last_fall_speed := 0.0
+## World-space offset of the camera from where it belongs, eased back to zero. Lets the
+## view stay put when a teleport has to nudge the body (e.g. out of the painting).
+var cam_offset := Vector3.ZERO
+var _just_teleported := false
 
 var held: RigidBody3D = null
 var held_link := Transform3D.IDENTITY
@@ -142,6 +146,8 @@ func place(pos: Vector3, p_yaw: float, p_pitch: float = 0.0) -> void:
 	pitch = p_pitch
 	velocity = Vector3.ZERO
 	cam_pivot.basis = Basis.IDENTITY
+	cam_offset = Vector3.ZERO
+	cam_pivot.position = Vector3.ZERO
 	_apply_rot()
 
 
@@ -165,9 +171,22 @@ func _process(delta: float) -> void:
 	_move(dt, active)
 	if G.portal_manager:
 		G.portal_manager.check_player_cross(prev_eye, camera.global_position)
+	if _just_teleported:
+		# the frame of a teleport shows exactly where the portal put the camera
+		_just_teleported = false
+	else:
+		_ease_camera(dt)
+	_update_look()
+
+
+func _ease_camera(dt: float) -> void:
 	if not cam_pivot.basis.is_equal_approx(Basis.IDENTITY):
 		cam_pivot.basis = cam_pivot.basis.slerp(Basis.IDENTITY, 1.0 - exp(-6.0 * dt)).orthonormalized()
-	_update_look()
+	if cam_offset != Vector3.ZERO:
+		cam_offset = cam_offset.lerp(Vector3.ZERO, 1.0 - exp(-7.0 * dt))
+		if cam_offset.length() < 0.0005:
+			cam_offset = Vector3.ZERO
+		cam_pivot.position = head.global_transform.basis.orthonormalized().inverse() * cam_offset
 
 
 func _wish() -> Vector2:
@@ -208,9 +227,14 @@ func _move(dt: float, active: bool) -> void:
 		speed = CROUCH_SPEED
 	elif active and Input.is_action_pressed("sprint"):
 		speed = SPRINT
+	# a hole in the floor you fall into catches you, so you drop through it instead of
+	# hitting the far lip just before you'd pass through
+	var falling_in: bool = not on_floor and G.portal_manager != null and G.portal_manager.over_floor_portal(global_position + col.position)
 	var hv := Vector3(velocity.x, 0.0, velocity.z)
 	if on_floor:
 		hv = hv.lerp(wish * speed, 1.0 - exp(-12.0 * dt))
+	elif falling_in:
+		hv *= exp(-6.0 * dt)
 	elif wish.length() > 0.01:
 		hv = hv.lerp(wish * maxf(speed, hv.length()), 1.0 - exp(-2.5 * dt))
 	velocity.x = hv.x
@@ -317,19 +341,42 @@ func portal_teleport(L: Transform3D, _src, dst) -> void:
 	_apply_rot()
 	var leveled := Basis(Vector3.UP, yaw) * Basis(Vector3.RIGHT, pitch)
 	cam_pivot.basis = (leveled.inverse() * nb).orthonormalized()
-	var p := new_cam.origin - Vector3(0.0, head.position.y, 0.0)
+	var p := new_cam.origin - L.basis * cam_offset - Vector3(0.0, head.position.y, 0.0)
+	var push := Vector3.ZERO
 	if tilted:
+		# the body has to come out of the wall (and clear of the floor or furniture below),
+		# but the view stays where it was and eases after it
 		var n: Vector3 = dst.normal()
+		var q := p
 		if absf(n.y) < 0.5:
-			p += n * (RADIUS + 0.15)
+			q += n * (RADIUS + 0.15)
+		q = _free_spot(q)
+		push = q - p
+		p = q
 	global_position = p
+	cam_offset = L.basis * cam_offset - push
+	cam_pivot.position = head.global_transform.basis.orthonormalized().inverse() * cam_offset
 	velocity = L.basis * velocity
 	if tilted and velocity.length() > 9.0:
 		velocity = velocity.normalized() * 9.0
 	if held:
 		held_link = held_link * L.affine_inverse()
-	if G.sfx:
-		G.sfx.play2d("whoosh", -14.0, randf_range(0.9, 1.1))
+	_just_teleported = true
+
+
+## The nearest spot at or above `p` where the body's capsule touches no level geometry.
+func _free_spot(p: Vector3) -> Vector3:
+	var space := get_world_3d().direct_space_state
+	var q := PhysicsShapeQueryParameters3D.new()
+	q.shape = shape
+	q.collision_mask = G.PL_WORLD | G.PL_GLASS
+	q.exclude = [get_rid()]
+	for k in 31:
+		var t := p + Vector3.UP * (0.04 * k)
+		q.transform = Transform3D(Basis.IDENTITY, t + col.position)
+		if space.intersect_shape(q, 1).is_empty():
+			return t
+	return p
 
 
 # --- Interaction ---------------------------------------------------------------------

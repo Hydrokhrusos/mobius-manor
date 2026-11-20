@@ -9,9 +9,9 @@ const VL_WORLD := 1
 const VL_PLAYER_BODY := 2
 const VL_MAIN_ONLY := 4
 const VL_UP_ONLY := 8
+const VL_BODY_CLONE := 16
 const VL_SUN := 64
-const MAIN_CULL := VL_WORLD | VL_MAIN_ONLY | VL_SUN
-const PORTAL_CULL := VL_WORLD | VL_PLAYER_BODY | VL_MAIN_ONLY | VL_SUN
+const MAIN_CULL := VL_WORLD | VL_MAIN_ONLY | VL_BODY_CLONE | VL_SUN
 
 # Physics layers (bit values)
 const PL_WORLD := 1

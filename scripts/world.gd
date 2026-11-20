@@ -3,6 +3,10 @@ extends Node3D
 ## Builds the whole house procedurally: rooms, impossible connections, furniture and toys.
 
 const T := 0.2
+# The repeating room sees itself through its own doors (one copy every 6 m). Portal views
+# go 3 levels deep, so the 4th copy (18 m) is never drawn: the fade must be complete by
+# then, or stepping through a door would make the far end of the corridor pop.
+const REPEAT_FADE := Vector2(9.0, 15.5)
 
 var portals: Array = []
 var P := {}
@@ -306,7 +310,7 @@ func glass_pane(c: Vector3, s: Vector3, collide := true) -> void:
 		blocker(c, s.max(Vector3(0.06, 0.06, 0.06)))
 
 
-func make_portal(pname: String, center: Vector3, normal: Vector3, up: Vector3, sz: Vector2, fallback := Color(0.03, 0.03, 0.035), fade := Vector2(8.0, 18.0)) -> Portal:
+func make_portal(pname: String, center: Vector3, normal: Vector3, up: Vector3, sz: Vector2, fallback := Color(0.03, 0.03, 0.035), fade := Vector2(40.0, 60.0)) -> Portal:
 	var p := Portal.new()
 	p.name = pname
 	p.size = sz
@@ -356,7 +360,7 @@ func _wsize(side: String, su: float, sy: float, sd: float) -> Vector3:
 	return Vector3(sd, sy, su)
 
 
-func portal_for(side: String, mn: Vector3, mx: Vector3, o: Dictionary, pname: String, fallback := Color(0.03, 0.03, 0.035), fade := Vector2(8.0, 18.0)) -> Portal:
+func portal_for(side: String, mn: Vector3, mx: Vector3, o: Dictionary, pname: String, fallback := Color(0.03, 0.03, 0.035), fade := Vector2(40.0, 60.0)) -> Portal:
 	var c := _wpos(side, mn, mx, o.at, mn.y + o.b + o.h * 0.5, -0.01)
 	return make_portal(pname, c, _side_normal(side), Vector3.UP, Vector2(o.w, o.h), fallback, fade)
 
@@ -618,6 +622,7 @@ func _build_foyer() -> void:
 	tick.volume_db = -10.0
 	tick.autoplay = true
 	tick.position = ck + Vector3(0, 1.8, 0)
+	tick.add_to_group("portal_audio")
 	_area_node.add_child(tick)
 	# coat rack
 	var cr := Vector3(-3.45, 0, -3.45)
@@ -794,8 +799,8 @@ func _build_repeating_room() -> void:
 	var o_w := op("w", -10.8, 1.4, 2.4)
 	room(mn, mx, M.teal_check, M.mustard, M.plaster, [o_s, o_e, o_w], {"base": M.wood_trim, "trim": M.wood_trim, "crown": M.wood_trim})
 	var fb := Color(0.05, 0.042, 0.03)
-	portal_for("e", mn, mx, o_e, "RepeatEast", fb, Vector2(7.0, 16.0))
-	portal_for("w", mn, mx, o_w, "RepeatWest", fb, Vector2(7.0, 16.0))
+	portal_for("e", mn, mx, o_e, "RepeatEast", fb, REPEAT_FADE)
+	portal_for("w", mn, mx, o_w, "RepeatWest", fb, REPEAT_FADE)
 	hanging_lamp(Vector3(-3.0, 2.3, -10.8), 3.0, 1.8, 9.0, true)
 	sign_label("YOU ARE HERE", Vector3(-3.0, 1.95, -13.765), 0.0, 44, Color(0.2, 0.12, 0.05))
 	sign_label("(and here, and here, and here...)", Vector3(-3.0, 1.72, -13.765), 0.0, 20, Color(0.25, 0.15, 0.06))
@@ -861,9 +866,9 @@ func _build_stairwell() -> void:
 	slab(O + Vector3(5.36, 3.95, -6.0), O + Vector3(5.36, 6.95, 0.0), 0.06, 0.06, true, M.dark_wood, true, false)
 	# portals
 	var fb := Color(0.04, 0.035, 0.03)
-	var up := make_portal("StairsUp", O + Vector3(1.25, 7.3, -0.01), Vector3(0, 0, 1), Vector3.UP, Vector2(2.5, 2.6), fb, Vector2(10.0, 22.0))
-	var down := make_portal("StairsDown", O + Vector3(1.25, 1.3, -0.01), Vector3(0, 0, -1), Vector3.UP, Vector2(2.5, 2.6), fb, Vector2(10.0, 22.0))
-	up.cam_layers = G.VL_WORLD | G.VL_PLAYER_BODY | G.VL_UP_ONLY | G.VL_SUN
+	var up := make_portal("StairsUp", O + Vector3(1.25, 7.3, -0.01), Vector3(0, 0, 1), Vector3.UP, Vector2(2.5, 2.6), fb)
+	var down := make_portal("StairsDown", O + Vector3(1.25, 1.3, -0.01), Vector3(0, 0, -1), Vector3.UP, Vector2(2.5, 2.6), fb)
+	up.cam_layers = G.VL_WORLD | G.VL_PLAYER_BODY | G.VL_UP_ONLY | G.VL_BODY_CLONE | G.VL_SUN
 	up.on_teleport = func(b):
 		if b == G.player:
 			_floor_changed(1)
@@ -963,7 +968,9 @@ func _build_attic() -> void:
 		box(Vector3(x, 2.3, -60.0), Vector3(0.14, 0.14, 8.0), M.beam)
 		box(Vector3(x, 3.1, -60.0), Vector3(0.12, 1.6, 0.12), M.beam, false)
 	# the trapdoor
-	make_portal("Trapdoor", Vector3(0, -0.01, -60.0), Vector3.UP, Vector3(0, 0, 1), Vector2(1.6, 2.0))
+	# "Up" of the trapdoor points north, the way you walk in from the attic door, so you
+	# come out of the painting facing the room rather than the wall.
+	make_portal("Trapdoor", Vector3(0, -0.01, -60.0), Vector3.UP, Vector3(0, 0, -1), Vector2(1.6, 2.0))
 	var lb := Basis(Vector3.RIGHT, deg_to_rad(-100.0))
 	box(Vector3(0, 0.0, -61.0) + lb * Vector3(0, 0.03, 1.0), Vector3(1.6, 0.05, 2.0), M.door_wood, true, true, lb)
 	box(Vector3(-0.83, 0.02, -60.0), Vector3(0.06, 0.04, 2.1), M.wood_trim, false)
@@ -1333,6 +1340,7 @@ func _build_greenhouse() -> void:
 	bird.volume_db = -8.0
 	bird.autoplay = true
 	bird.position = Vector3(0, 4.0, 70.0)
+	bird.add_to_group("portal_audio")
 	_area_node.add_child(bird)
 	var bscript: Script = load("res://scripts/butterfly.gd")
 	for k in 7:

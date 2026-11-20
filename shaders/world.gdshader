@@ -17,6 +17,10 @@ uniform vec4 emission : source_color = vec4(0.0, 0.0, 0.0, 1.0);
 uniform float emission_energy = 0.0;
 uniform bool object_space = false;
 uniform float grime = 0.1;
+// Per-object clip plane (xyz = normal, w = distance; all zero = off). Set while a prop or
+// the player is half-way through a portal: the object is cut at the portal it is entering
+// and its copy at the exit portal, so neither pokes out of the wrong side of a door.
+instance uniform vec4 obj_clip = vec4(0.0);
 
 varying vec3 v_world;
 varying vec3 v_ppos;
@@ -120,7 +124,7 @@ void vertex() {
 }
 
 void fragment() {
-	if (portal_clipped(v_world, CAMERA_VISIBLE_LAYERS)) {
+	if (portal_clipped(v_world, CAMERA_VISIBLE_LAYERS) || dot(obj_clip.xyz, v_world) < obj_clip.w) {
 		discard;
 	}
 	vec3 n = normalize(v_pnrm);

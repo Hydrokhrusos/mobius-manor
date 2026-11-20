@@ -1,12 +1,16 @@
 class_name PortalManager
 extends Node
-## Renders portals through a small pool of SubViewports (level-1 views seen directly by
-## the player, plus a few level-2 views seen through another portal), teleports the
-## player and physics props, and offers raycasts that pass through portals.
+## Renders portals through a small pool of SubViewports, teleports the player and physics
+## props, and offers raycasts that pass through portals.
+##
+## Views are handed out best-first by how much of the screen they cover: a portal seen
+## directly by the player, a portal seen through that one, and so on up to MAX_DEPTH
+## levels. A portal can be seen by several cameras at once and gets one view per camera.
 
-const MAX_SLOTS := 6
-const MAX_L1 := 4
+const MAX_SLOTS := 8
+const MAX_DEPTH := 3
 const MAX_DIST := 75.0
+const BODY_REACH := 0.45
 
 class Slot:
 	var vp: SubViewport
@@ -14,6 +18,8 @@ class Slot:
 	var id := 0
 	var portal = null
 	var active := false
+	var depth := 0
+	var rect := Rect2()
 
 var portals: Array = []
 var slots: Array = []
@@ -23,6 +29,7 @@ var clip_img: Image
 var clip_tex: ImageTexture
 var quality := 1.0
 var _size := Vector2i.ZERO
+var _full_size := Vector2i.ZERO
 var _prev_pos := {}
 var _over_is_outside := true
 var _frustum_checked := false
@@ -39,6 +46,7 @@ func setup(p_portals: Array, cam: Camera3D, portal_env: Environment) -> void:
 	clip_img.fill(Color(0.0, 0.0, 0.0, -1.0))
 	clip_tex = ImageTexture.create_from_image(clip_img)
 	RenderingServer.global_shader_parameter_set("portal_clip_planes", clip_tex)
+	var main_vp := get_viewport()
 	for i in MAX_SLOTS:
 		var s := Slot.new()
 		s.id = i + 1
@@ -46,8 +54,10 @@ func setup(p_portals: Array, cam: Camera3D, portal_env: Environment) -> void:
 		s.vp.name = "PortalView%d" % s.id
 		s.vp.render_target_update_mode = SubViewport.UPDATE_DISABLED
 		s.vp.use_hdr_2d = true
-		s.vp.msaa_3d = Viewport.MSAA_2X
-		s.vp.positional_shadow_atlas_size = 2048
+		# Match the main view so shadows don't sharpen as you step through.
+		s.vp.msaa_3d = main_vp.msaa_3d
+		s.vp.positional_shadow_atlas_size = main_vp.positional_shadow_atlas_size
+		s.vp.positional_shadow_atlas_16_bits = main_vp.positional_shadow_atlas_16_bits
 		s.vp.audio_listener_enable_3d = false
 		s.vp.gui_disable_input = true
 		s.vp.size = Vector2i(64, 64)
@@ -69,12 +79,17 @@ func set_quality(q: float) -> void:
 func _process(_delta: float) -> void:
 	if main_cam == null:
 		return
-	var vsz := Vector2i((get_viewport().get_visible_rect().size * quality).round())
+	var full_sz := Vector2i(get_viewport().get_visible_rect().size.round())
+	var vsz := Vector2i((Vector2(full_sz) * quality).round())
 	vsz = vsz.max(Vector2i(64, 64))
-	if vsz != _size:
+	if vsz != _size or full_sz != _full_size:
 		_size = vsz
+		_full_size = full_sz
 		for s in slots:
 			s.vp.size = vsz
+		# The last slot always holds the view that covers the most screen (the portal you
+		# are about to walk through), so it stays sharp even on "Fast".
+		slots[MAX_SLOTS - 1].vp.size = full_sz.max(Vector2i(64, 64))
 	var cam_t := main_cam.global_transform
 	var cam_pos := cam_t.origin
 	var frustum := main_cam.get_frustum()
@@ -88,70 +103,44 @@ func _process(_delta: float) -> void:
 		_over_is_outside = overs < 3
 
 	for p in portals:
-		p.l2_assigned = false
+		p.clear_views()
 		p.near_update(cam_pos)
-		if p.mat:
-			p.mat.set_shader_parameter("main_active", false)
-			p.mat.set_shader_parameter("l2_parent", -1)
+	_update_body_clone(cam_pos)
+	_update_flashlight(cam_t)
 
-	var cands := []
-	for p in portals:
-		if not p.can_render or p.target == null:
-			continue
-		var sc := _score(p, cam_pos, frustum, true)
-		if sc > 0.0:
-			cands.append([sc, p])
-	cands.sort_custom(func(a, b): return a[0] > b[0])
-
+	# Best-first: always render the candidate view that covers the most screen. A view's
+	# children (portals seen through it) become candidates once it has a slot.
+	# Slots are handed out from the last one down. SubViewports render in tree order, so a
+	# view seen through another one renders first and its parent samples this frame's
+	# image rather than last frame's.
 	var used := 0
-	var l1 := []
-	for c in cands:
-		if used >= MAX_L1:
-			break
+	var cands := []
+	_add_candidates(cands, null, main_cam, frustum, Rect2(0.0, 0.0, 1.0, 1.0))
+	while used < MAX_SLOTS and not cands.is_empty():
+		var bi := 0
+		for i in range(1, cands.size()):
+			if cands[i][0] > cands[bi][0]:
+				bi = i
+		var c: Array = cands[bi]
+		cands.remove_at(bi)
 		var p = c[1]
-		var s: Slot = slots[used]
-		used += 1
-		_activate(s, p, p.link() * cam_t)
-		p.mat.set_shader_parameter("tex_main", s.vp.get_texture())
-		p.mat.set_shader_parameter("main_active", true)
-		l1.append(s)
-
-	for ps in l1:
-		if used >= MAX_SLOTS:
-			break
-		var parent = ps.portal
-		var exit = parent.target
-		var vt: Transform3D = ps.cam.global_transform
-		var vfr: Array = ps.cam.get_frustum()
-		var prect := _screen_rect(main_cam, parent)
-		if prect.size.x <= 0.0 or prect.size.y <= 0.0:
+		var parent = c[2]
+		if p.view_count >= Portal.MAX_VIEWS:
 			continue
-		var best = null
-		var best_sc := 0.0
-		for q in portals:
-			if q == exit or q.l2_assigned or not q.can_render or q.target == null or q.no_l2:
-				continue
-			if exit.signed_dist(q.center()) < 0.02:
-				continue
-			var sc := _score(q, vt.origin, vfr, false)
-			if sc <= best_sc:
-				continue
-			var qrect := _screen_rect(ps.cam, q)
-			if not prect.intersects(qrect):
-				continue
-			best = q
-			best_sc = sc
-		if best != null:
-			var s: Slot = slots[used]
-			used += 1
-			_activate(s, best, best.link() * vt)
-			best.l2_assigned = true
-			best.mat.set_shader_parameter("tex_l2", s.vp.get_texture())
-			best.mat.set_shader_parameter("l2_parent", ps.id)
+		var s: Slot = slots[MAX_SLOTS - 1 - used]
+		used += 1
+		var parent_xf: Transform3D = cam_t if parent == null else parent.cam.global_transform
+		_activate(s, p, p.link() * parent_xf, parent == null)
+		s.depth = 1 if parent == null else parent.depth + 1
+		s.rect = c[3]
+		p.add_view(0 if parent == null else parent.id, s.vp.get_texture())
+		if s.depth < MAX_DEPTH:
+			_add_candidates(cands, s, s.cam, s.cam.get_frustum(), s.rect)
 
 	stats_active = used
 	_update_clones()
-	for i in range(used, MAX_SLOTS):
+	_update_audio(cam_pos)
+	for i in range(0, MAX_SLOTS - used):
 		var s: Slot = slots[i]
 		if s.active:
 			s.active = false
@@ -161,14 +150,38 @@ func _process(_delta: float) -> void:
 	clip_tex.update(clip_img)
 
 
-func _activate(s: Slot, p, xform: Transform3D) -> void:
+## Adds the portals visible from `cam` (the main camera, or the camera of `parent`) whose
+## screen rectangle overlaps `rect`, the part of the screen the parent view covers.
+func _add_candidates(cands: Array, parent, cam: Camera3D, frustum: Array, rect: Rect2) -> void:
+	var origin := cam.global_transform.origin
+	for p in portals:
+		if not p.can_render or p.target == null or p.mat == null:
+			continue
+		if parent != null:
+			var ex = parent.portal.target
+			# the exit itself and anything behind it is clipped away in that view
+			if p == ex or ex.signed_dist(p.center()) < 0.02:
+				continue
+		if _score(p, origin, frustum, parent == null) <= 0.0:
+			continue
+		var r := _screen_rect(cam, p).intersection(rect)
+		if r.size.x <= 0.0 or r.size.y <= 0.0:
+			continue
+		cands.append([r.size.x * r.size.y, p, parent, r])
+
+
+func _activate(s: Slot, p, xform: Transform3D, from_main: bool) -> void:
 	s.portal = p
 	s.active = true
 	s.cam.global_transform = xform.orthonormalized()
 	s.cam.fov = main_cam.fov
 	s.cam.near = main_cam.near
 	s.cam.far = main_cam.far
-	s.cam.cull_mask = p.cam_layers | (s.id << 8)
+	var mask: int = p.cam_layers
+	if from_main and p == _body_portal:
+		# this camera sits inside the copy of the player's body at the exit
+		mask &= ~G.VL_BODY_CLONE
+	s.cam.cull_mask = mask | (s.id << 8)
 	s.vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	var ex = p.target
 	var n: Vector3 = ex.normal()
@@ -181,10 +194,15 @@ func _outside(pl: Plane, pt: Vector3) -> bool:
 
 func _score(p, cam_pos: Vector3, frustum: Array, occl: bool) -> float:
 	var sd: float = p.signed_dist(cam_pos)
-	if sd < -0.02:
+	if sd < 0.0:
 		return 0.0
 	var cs: Array = p.corners(1.0)
-	for pl in frustum:
+	# Skip the near and far planes (indices 0 and 1). When the camera is closer to the
+	# portal than its near distance, every corner is behind the near plane even though the
+	# portal fills the screen, and culling it here made the doorway flash dark right
+	# before stepping through.
+	for i in range(2, frustum.size()):
+		var pl: Plane = frustum[i]
 		var all_out := true
 		for c in cs:
 			if not _outside(pl, c):
@@ -215,26 +233,65 @@ func _ray_visible(from: Vector3, p) -> bool:
 	return false
 
 
+## The portal's bounding rectangle on screen in 0..1 coordinates. Corners behind the
+## camera are clipped against a plane just in front of it instead of giving up.
 func _screen_rect(cam: Camera3D, p) -> Rect2:
 	var full := Rect2(0.0, 0.0, 1.0, 1.0)
-	var vs := cam.get_viewport().get_visible_rect().size
+	var ct := cam.global_transform
+	var le: Vector3 = p.to_local_p(ct.origin)
+	if le.z >= 0.0 and le.z < 0.1 and absf(le.x) < p.size.x * 0.5 + 0.05 and absf(le.y) < p.size.y * 0.5 + 0.05:
+		return full
+	var inv := ct.affine_inverse()
+	var vs := []
+	for c in p.corners(1.0):
+		vs.append(inv * c)
+	var vsz := cam.get_viewport().get_visible_rect().size
+	var zn := -0.0001
 	var r := Rect2()
 	var first := true
-	for c in p.corners(1.0):
-		if cam.is_position_behind(c):
-			return full
-		var sp: Vector2 = cam.unproject_position(c) / vs
-		if first:
-			r = Rect2(sp, Vector2.ZERO)
-			first = false
-		else:
-			r = r.expand(sp)
+	for i in 4:
+		var a: Vector3 = vs[i]
+		var b: Vector3 = vs[(i + 1) % 4]
+		var pts := []
+		if a.z < zn:
+			pts.append(a)
+		if (a.z < zn) != (b.z < zn):
+			pts.append(a.lerp(b, (zn - a.z) / (b.z - a.z)))
+		for q in pts:
+			var sp: Vector2 = cam.unproject_position(ct * q) / vsz
+			if first:
+				r = Rect2(sp, Vector2.ZERO)
+				first = false
+			else:
+				r = r.expand(sp)
+	if first:
+		return Rect2()
 	return r.intersection(full)
 
 
-# --- Visual clones of props that are half-way through a portal ---------------------
+# --- Copies of things that are half-way through a portal ----------------------------
+# The part of a prop (or of the player's body) that pokes through a portal is drawn by a
+# copy at the exit. The real object is cut at the entry plane and the copy at the exit
+# plane (world shader `obj_clip`), so neither shows up on the wrong side of a door.
 
 var _clones := {}
+var _clipped := {}
+var _body_portal = null
+var _body_clone: Node3D = null
+var _body_clone_head: Node3D = null
+
+
+func _plane_of(p) -> Vector4:
+	var n: Vector3 = p.normal()
+	return Vector4(n.x, n.y, n.z, n.dot(p.center()))
+
+
+func _set_clip(root: Node, plane: Vector4) -> void:
+	for c in root.get_children():
+		if c is GeometryInstance3D:
+			(c as GeometryInstance3D).set_instance_shader_parameter("obj_clip", plane)
+		if c.get_child_count() > 0:
+			_set_clip(c, plane)
 
 
 func _body_radius(rb: RigidBody3D) -> float:
@@ -251,16 +308,19 @@ func _body_radius(rb: RigidBody3D) -> float:
 
 func _update_clones() -> void:
 	var used := {}
+	var clip_now := {}
 	for b in get_tree().get_nodes_in_group("travelers"):
 		var rb := b as RigidBody3D
 		if rb == null or not rb.is_inside_tree():
 			continue
 		var bid := rb.get_instance_id()
 		if rb.sleeping:
-			# keep whatever clone a resting body already has
+			# keep whatever clone and cut a resting body already has
 			for k in _clones.keys():
 				if (k as String).begins_with("%d_" % bid):
 					used[k] = true
+			if _clipped.has(bid):
+				clip_now[bid] = _clipped[bid]
 			continue
 		var pos := rb.global_position
 		var r := _body_radius(rb)
@@ -278,9 +338,16 @@ func _update_clones() -> void:
 			var c: Node3D = _clones.get(key)
 			if c == null:
 				c = _make_clone(rb)
+				_set_clip(c, _plane_of(p.target))
 				_clones[key] = c
 			c.global_transform = p.link() * rb.global_transform
 			used[key] = true
+			# only cut the real body when it is actually going through the opening
+			if absf(lp.x) <= p.size.x * 0.5 and absf(lp.y) <= p.size.y * 0.5:
+				var plane := _plane_of(p)
+				if not _clipped.has(bid) or _clipped[bid][1] != plane:
+					_set_clip(rb, plane)
+				clip_now[bid] = [rb, plane]
 			break
 	for k in _clones.keys():
 		if not used.has(k):
@@ -288,6 +355,12 @@ func _update_clones() -> void:
 			if is_instance_valid(c):
 				c.queue_free()
 			_clones.erase(k)
+	for bid in _clipped.keys():
+		if not clip_now.has(bid):
+			var rb = _clipped[bid][0]
+			if is_instance_valid(rb):
+				_set_clip(rb, Vector4.ZERO)
+	_clipped = clip_now
 
 
 func _make_clone(rb: RigidBody3D) -> Node3D:
@@ -304,7 +377,180 @@ func _make_clone(rb: RigidBody3D) -> Node3D:
 	return n
 
 
+## The portal the player's body is currently poking through (eye in front of it, some of
+## the body behind it), or null.
+func _find_body_portal(eye: Vector3):
+	var pl = G.player
+	if pl == null or pl.body_vis == null:
+		return null
+	var top := eye + Vector3.UP * 0.35
+	var bot: Vector3 = pl.global_position
+	for p in portals:
+		if not p.can_teleport or p.target == null or p.signed_dist(eye) < 0.0:
+			continue
+		var n: Vector3 = p.normal()
+		var side := BODY_REACH * sqrt(maxf(0.0, 1.0 - n.y * n.y))
+		if minf(p.signed_dist(top), p.signed_dist(bot)) - side >= 0.0:
+			continue
+		var a: Vector3 = p.to_local_p(top)
+		var b: Vector3 = p.to_local_p(bot)
+		var hx: float = p.size.x * 0.5
+		var hy: float = p.size.y * 0.5
+		if minf(a.x, b.x) > hx or maxf(a.x, b.x) < -hx or minf(a.y, b.y) > hy or maxf(a.y, b.y) < -hy:
+			continue
+		return p
+	return null
+
+
+func _update_body_clone(eye: Vector3) -> void:
+	var p = _find_body_portal(eye)
+	if p != _body_portal:
+		_body_portal = p
+		if _body_clone != null:
+			_body_clone.queue_free()
+			_body_clone = null
+			_body_clone_head = null
+		var body: Node3D = G.player.body_vis if G.player else null
+		if body != null:
+			_set_clip(body, Vector4.ZERO if p == null else _plane_of(p))
+			if p != null:
+				_body_clone = body.duplicate() as Node3D
+				add_child(_body_clone)
+				_set_layers(_body_clone, G.VL_BODY_CLONE)
+				_set_clip(_body_clone, _plane_of(p.target))
+				_body_clone_head = _body_clone.get_child(G.player.head_vis.get_index())
+	if _body_clone != null:
+		_body_clone.global_transform = p.link() * G.player.body_vis.global_transform
+		_body_clone_head.transform = G.player.head_vis.transform
+
+
+func _set_layers(root: Node, layers: int) -> void:
+	for c in root.get_children():
+		if c is VisualInstance3D:
+			(c as VisualInstance3D).layers = layers
+		if c.get_child_count() > 0:
+			_set_layers(c, layers)
+
+
+# --- The flashlight shining through a portal -----------------------------------------
+# A copy of the flashlight on the far side lights the room you are looking into. It
+# fades in over the last couple of metres, so it is at full strength at the moment you
+# step through and the real flashlight takes over.
+
+const FLASH_REACH := 2.5
+var _flash_clone: SpotLight3D = null
+
+
+func _update_flashlight(cam_t: Transform3D) -> void:
+	var fl: SpotLight3D = G.player.flashlight if G.player else null
+	var best = null
+	var best_d := INF
+	if fl != null and fl.is_visible_in_tree():
+		var fwd := -cam_t.basis.z
+		for p in portals:
+			if not p.can_teleport or p.target == null:
+				continue
+			var sd: float = p.signed_dist(cam_t.origin)
+			if sd < 0.0 or sd > FLASH_REACH or fwd.dot(-p.normal()) < 0.1:
+				continue
+			var lp: Vector3 = p.to_local_p(cam_t.origin)
+			if absf(lp.x) > p.size.x * 0.5 + 1.0 or absf(lp.y) > p.size.y * 0.5 + 1.5:
+				continue
+			if sd < best_d:
+				best_d = sd
+				best = p
+	if best == null:
+		if _flash_clone != null:
+			_flash_clone.visible = false
+		return
+	if _flash_clone == null:
+		_flash_clone = SpotLight3D.new()
+		add_child(_flash_clone)
+	_flash_clone.spot_range = fl.spot_range
+	_flash_clone.spot_angle = fl.spot_angle
+	_flash_clone.spot_attenuation = fl.spot_attenuation
+	_flash_clone.spot_angle_attenuation = fl.spot_angle_attenuation
+	_flash_clone.light_color = fl.light_color
+	_flash_clone.shadow_enabled = fl.shadow_enabled
+	_flash_clone.light_energy = fl.light_energy * (1.0 - smoothstep(0.6, FLASH_REACH, best_d))
+	_flash_clone.global_transform = best.link() * fl.global_transform
+	_flash_clone.visible = true
+
+
+# --- Sounds heard through portals ----------------------------------------------------
+# Looping positional sounds (group "portal_audio": the clock, the birds, music boxes) also
+# play from where they appear through a portal when that is closer than the real thing,
+# so stepping through a portal doesn't suddenly switch a sound on or off.
+
+var _audio_proxies := {}
+
+
+func _update_audio(listener: Vector3) -> void:
+	var live := {}
+	for n in get_tree().get_nodes_in_group("portal_audio"):
+		var src := n as AudioStreamPlayer3D
+		if src == null or not src.is_inside_tree() or not src.playing:
+			continue
+		var sp := src.global_position
+		var best_d := listener.distance_to(sp)
+		var best_pos := Vector3.ZERO
+		var found := false
+		for p in portals:
+			if not p.can_teleport or p.target == null or p.signed_dist(listener) < 0.0:
+				continue
+			if p.target.signed_dist(sp) < 0.0:
+				continue
+			var img: Vector3 = p.link().affine_inverse() * sp
+			var d := listener.distance_to(img)
+			if d < best_d and d < src.max_distance:
+				best_d = d
+				best_pos = img
+				found = true
+		if not found:
+			continue
+		var id := src.get_instance_id()
+		var px: AudioStreamPlayer3D = _audio_proxies.get(id)
+		if px == null:
+			px = AudioStreamPlayer3D.new()
+			px.stream = src.stream
+			px.volume_db = src.volume_db
+			px.unit_size = src.unit_size
+			px.max_db = src.max_db
+			px.max_distance = src.max_distance
+			px.pitch_scale = src.pitch_scale
+			px.attenuation_model = src.attenuation_model
+			px.attenuation_filter_cutoff_hz = src.attenuation_filter_cutoff_hz
+			px.attenuation_filter_db = src.attenuation_filter_db
+			px.panning_strength = src.panning_strength
+			px.bus = src.bus
+			add_child(px)
+			_audio_proxies[id] = px
+		px.global_position = best_pos
+		if px.stream != src.stream:
+			px.stream = src.stream
+		if not px.playing:
+			px.play(src.get_playback_position())
+		live[id] = true
+	for id in _audio_proxies.keys():
+		if not live.has(id):
+			var px: AudioStreamPlayer3D = _audio_proxies[id]
+			if is_instance_valid(px):
+				px.queue_free()
+			_audio_proxies.erase(id)
+
+
 # --- Teleporting -----------------------------------------------------------------
+
+## True when `pos` is above (or falling through) a portal set into the floor.
+func over_floor_portal(pos: Vector3) -> bool:
+	for p in portals:
+		if not p.can_teleport or p.target == null or p.normal().y < 0.7:
+			continue
+		var lp: Vector3 = p.to_local_p(pos)
+		if lp.z < 2.0 and lp.z > -2.0 and absf(lp.x) < p.size.x * 0.5 and absf(lp.y) < p.size.y * 0.5:
+			return true
+	return false
+
 
 func check_player_cross(prev_eye: Vector3, eye: Vector3) -> void:
 	for p in portals:
