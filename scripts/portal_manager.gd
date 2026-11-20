@@ -239,7 +239,7 @@ func _screen_rect(cam: Camera3D, p) -> Rect2:
 	var full := Rect2(0.0, 0.0, 1.0, 1.0)
 	var ct := cam.global_transform
 	var le: Vector3 = p.to_local_p(ct.origin)
-	if le.z >= 0.0 and le.z < 0.1 and absf(le.x) < p.size.x * 0.5 + 0.05 and absf(le.y) < p.size.y * 0.5 + 0.05:
+	if le.z >= 0.0 and le.z < 0.1 and absf(le.x) < p.size.x * 0.5 + 0.05 and absf(le.y) < p.size.y * 0.5 + 0.05 			and (-ct.basis.z).dot(p.normal()) < 0.0:
 		return full
 	var inv := ct.affine_inverse()
 	var vs := []
@@ -467,14 +467,28 @@ func _update_flashlight(cam_t: Transform3D) -> void:
 	if _flash_clone == null:
 		_flash_clone = SpotLight3D.new()
 		add_child(_flash_clone)
-	_flash_clone.spot_range = fl.spot_range
+	# Start the copy where its beam comes out of the exit, so nothing behind the exit (the
+	# wardrobe's back panel, say) can shade it.
+	var xf: Transform3D = best.link() * fl.global_transform
+	var ex = best.target
+	var axis := -xf.basis.z
+	var into: float = axis.dot(ex.normal())
+	var sd: float = ex.signed_dist(xf.origin)
+	var moved := 0.0
+	if sd < 0.0:
+		if into < 0.1:
+			_flash_clone.visible = false
+			return
+		moved = -sd / into
+		xf.origin += axis * moved
+	_flash_clone.spot_range = maxf(fl.spot_range - moved, 0.5)
 	_flash_clone.spot_angle = fl.spot_angle
 	_flash_clone.spot_attenuation = fl.spot_attenuation
 	_flash_clone.spot_angle_attenuation = fl.spot_angle_attenuation
 	_flash_clone.light_color = fl.light_color
 	_flash_clone.shadow_enabled = fl.shadow_enabled
 	_flash_clone.light_energy = fl.light_energy * (1.0 - smoothstep(0.6, FLASH_REACH, best_d))
-	_flash_clone.global_transform = best.link() * fl.global_transform
+	_flash_clone.global_transform = xf
 	_flash_clone.visible = true
 
 
@@ -542,13 +556,25 @@ func _update_audio(listener: Vector3) -> void:
 
 # --- Teleporting -----------------------------------------------------------------
 
-## True when `pos` is above (or falling through) a portal set into the floor.
-func over_floor_portal(pos: Vector3) -> bool:
+## True when a ball of radius `rad` at `pos` would sit behind a walkable portal, in its
+## doorway, where nothing would ever carry it through.
+func behind_portal(pos: Vector3, rad: float) -> bool:
+	for p in portals:
+		if not p.can_teleport or p.target == null:
+			continue
+		var lp: Vector3 = p.to_local_p(pos)
+		if lp.z < 0.0 and lp.z > -1.0 and absf(lp.x) < p.size.x * 0.5 + rad and absf(lp.y) < p.size.y * 0.5 + rad:
+			return true
+	return false
+
+
+## True when `feet` have dropped into a portal set into the floor (not just jumping over it).
+func in_floor_portal(feet: Vector3) -> bool:
 	for p in portals:
 		if not p.can_teleport or p.target == null or p.normal().y < 0.7:
 			continue
-		var lp: Vector3 = p.to_local_p(pos)
-		if lp.z < 2.0 and lp.z > -2.0 and absf(lp.x) < p.size.x * 0.5 and absf(lp.y) < p.size.y * 0.5:
+		var lp: Vector3 = p.to_local_p(feet)
+		if lp.z < 0.05 and lp.z > -2.0 and absf(lp.x) < p.size.x * 0.5 and absf(lp.y) < p.size.y * 0.5:
 			return true
 	return false
 
@@ -601,12 +627,12 @@ func teleport_body(rb: RigidBody3D, p) -> void:
 ## by the physics engine's depenetration, which can send it through a wall.
 func _unstick(rb: RigidBody3D, exit) -> void:
 	var kc := KinematicCollision3D.new()
-	if not rb.test_move(rb.global_transform, Vector3.ZERO, kc, 0.001, true) or kc.get_depth() < 0.03:
+	if not rb.test_move(rb.global_transform, Vector3.ZERO, kc, 0.001, true) or kc.get_travel().length() < 0.03:
 		return
 	var n: Vector3 = exit.normal()
 	for k in range(1, 31):
 		var t := rb.global_transform.translated(n * (0.02 * k))
-		if not rb.test_move(t, Vector3.ZERO, kc, 0.001, true) or kc.get_depth() < 0.01:
+		if not rb.test_move(t, Vector3.ZERO, kc, 0.001, true) or kc.get_travel().length() < 0.005:
 			rb.global_transform = t
 			return
 

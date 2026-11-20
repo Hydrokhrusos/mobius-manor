@@ -379,7 +379,7 @@ func _process(delta: float) -> void:
 	var usable := false
 	if state == "playing" and not p.held:
 		var c = p.look_target()
-		usable = c != null and ((c is RigidBody3D and c.is_in_group("grabbable")) or c.has_method("interact"))
+		usable = c != null and ((c is RigidBody3D and c.is_in_group("grabbable")) or c is Interactable or (c is Prop and c.is_usable()))
 	cross.active = usable
 	cross.visible = state == "playing"
 	cross.queue_redraw()

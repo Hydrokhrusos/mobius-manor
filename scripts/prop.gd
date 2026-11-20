@@ -38,6 +38,11 @@ func _on_hit(_other: Node) -> void:
 		G.sfx.impact(global_position, v, mass, kind)
 
 
+## Whether pressing E on this does anything.
+func is_usable() -> bool:
+	return action.is_valid() or kind == "duck"
+
+
 func interact(_who) -> void:
 	if kind == "duck":
 		_squeak()

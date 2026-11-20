@@ -233,7 +233,7 @@ func _move(dt: float, active: bool) -> void:
 		speed = SPRINT
 	# a hole in the floor you fall into catches you, so you drop through it instead of
 	# hitting the far lip just before you'd pass through
-	var falling_in: bool = not on_floor and G.portal_manager != null and G.portal_manager.over_floor_portal(global_position + col.position)
+	var falling_in: bool = not on_floor and velocity.y <= 0.0 and G.portal_manager != null and G.portal_manager.in_floor_portal(global_position)
 	var hv := Vector3(velocity.x, 0.0, velocity.z)
 	if on_floor:
 		hv = hv.lerp(wish * speed, 1.0 - exp(-12.0 * dt))
@@ -291,6 +291,12 @@ func _after_move(dt: float) -> void:
 				step_accum = 0.0
 				if G.sfx:
 					G.sfx.play2d("step", -14.0 if crouching else -9.0, randf_range(0.85, 1.15))
+
+
+## Portal links pick up a little float error each time they are combined (the greenhouse
+## is 1000 m away), so compare them loosely.
+static func _same_link(a: Transform3D, b: Transform3D) -> bool:
+	return a.basis.is_equal_approx(b.basis) and a.origin.distance_to(b.origin) < 0.01
 
 
 func _update_releasing() -> void:
@@ -570,6 +576,9 @@ func spawn(kind: String) -> void:
 	var spot = null
 	var first := true
 	for c in spots:
+		if r.exit == null and G.portal_manager.behind_portal(c, rad):
+			first = false
+			continue
 		spot = _free_prop_spot(c, rad)
 		if spot != null:
 			break
@@ -614,7 +623,7 @@ func _physics_process(dt: float) -> void:
 	# standing close to a wall never drags the held thing into or through it.
 	var dist := hold_dist
 	var r: Dictionary = G.portal_manager.portal_raycast(camera.global_position, -camera.global_transform.basis.z, hold_dist + _held_r + 0.05, G.PL_WORLD | G.PL_GLASS, [get_rid(), held.get_rid()])
-	if r.hit and (r.link as Transform3D).is_equal_approx(held_link):
+	if r.hit and _same_link(r.link, held_link):
 		dist = minf(dist, maxf(float(r.distance) - _held_r - 0.05, 0.0))
 	var tgt := ct.origin - ct.basis.z * dist
 	var diff := tgt - held.global_position

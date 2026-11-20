@@ -492,6 +492,26 @@ func _trapdoor_test() -> void:
 		var fwd: Vector3 = -G.player.global_transform.basis.z
 		print("SEAM Trapdoor %s pitch %.1f: camera jump on exit=%.3f m (largest step while falling %.3f m), hit the lip=%s, facing room=%.2f -> %s" % [
 			"sprint" if run[1] else "walk", run[0], jump, normal_step, bump, fwd.dot(painting.normal()), G.world.area_at(G.player.global_position)])
+	# a running jump across the hole should clear it, not get caught by it
+	G.player.place(Vector3(2.6, 0.001, -60.0), PI * 0.5, 0.0)
+	await _frames(5)
+	G.player.debug_input = Vector2(0, -1)
+	Input.action_press("sprint")
+	var jumped := false
+	for i in 240:
+		await get_tree().process_frame
+		if not jumped and G.player.global_position.x < 1.05:
+			Input.action_press("jump")
+			jumped = true
+		elif jumped:
+			Input.action_release("jump")
+		if G.player.global_position.x < -1.6:
+			break
+	G.player.debug_input = Vector2.ZERO
+	Input.action_release("sprint")
+	await _frames(30)
+	var landed: Vector3 = G.player.global_position
+	print("SEAM Trapdoor jump across: landed at x=%.2f in %s (%s)" % [landed.x, G.world.area_at(landed), "OK" if G.world.area_at(landed) == "The Attic" and landed.x < -0.8 else "FAIL"])
 
 
 func _diff(full_a: Image, full_b: Image) -> Dictionary:
