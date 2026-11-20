@@ -146,9 +146,9 @@ func _find_prop(kind: String) -> Prop:
 	return null
 
 
-func _find_interactable(prompt: String) -> Interactable:
-	for n in get_tree().get_root().find_children("*", "StaticBody3D", true, false):
-		if n is Interactable and n.prompt == prompt:
+func _find_interactable(node_name: String) -> Interactable:
+	for n in get_tree().get_root().find_children(node_name, "StaticBody3D", true, false):
+		if n is Interactable:
 			return n
 	return null
 
@@ -163,12 +163,12 @@ func _interact_test() -> void:
 	lamp.interact(G.player)
 	print("INTERACT lamp light visible after toggle: %s (expected false)" % lamp.light.visible)
 	lamp.interact(G.player)
-	var btn := _find_interactable("Press the big red button")
+	var btn := _find_interactable("BigRedButton")
 	var before: int = G.world.spawned_root.get_child_count()
 	btn.interact(G.player)
 	await get_tree().create_timer(1.5).timeout
 	print("INTERACT ball machine spawned %d balls" % (G.world.spawned_root.get_child_count() - before))
-	var sw := _find_interactable("Flip light switch")
+	var sw := _find_interactable("LightSwitch")
 	sw.interact(G.player)
 	sw.interact(G.player)
 	G.player.place(Vector3(70.0, 0.05, -2.0), PI, 0.0)

@@ -16,15 +16,12 @@ var spawn_pos := Vector3(0.0, 0.05, -2.2)
 var spawn_yaw := PI
 var props_root: Node3D
 var spawned_root: Node3D
-var floor_label_main: Label3D
-var floor_label_up: Label3D
 var _box_cache := {}
 var _flower_mats := {}
 var _area_node: Node3D
 var _body: StaticBody3D
 var _layers := 1
 var _off := Vector3.ZERO
-var _cur_area := ""
 var _cleanup_t := 0.0
 
 
@@ -50,15 +47,8 @@ func build() -> void:
 func _process(delta: float) -> void:
 	if G.player == null:
 		return
-	var a := area_at(G.player.global_position)
-	if a != "" and a != _cur_area:
-		_cur_area = a
-		if G.hud:
-			G.hud.area_toast(a)
 	if G.player.global_position.y < -40.0:
 		G.player.place(spawn_pos, spawn_yaw)
-		if G.hud:
-			G.hud.toast("The house catches you and puts you back.", 3.0)
 	_cleanup_t += delta
 	if _cleanup_t > 1.0:
 		_cleanup_t = 0.0
@@ -67,10 +57,6 @@ func _process(delta: float) -> void:
 				if G.player.held == b:
 					G.player.drop()
 				b.queue_free()
-
-
-func current_area() -> String:
-	return _cur_area
 
 
 func area_at(p: Vector3) -> String:
@@ -280,22 +266,6 @@ func omni(pos: Vector3, color: Color, energy: float, rng: float, shadow := false
 	return l
 
 
-func sign_label(text: String, pos: Vector3, yaw: float, px := 48, color := Color(0.95, 0.88, 0.7), layers := -1, pixel := 0.0035) -> Label3D:
-	var l := Label3D.new()
-	l.text = text
-	l.font = G.serif_font
-	l.font_size = px
-	l.pixel_size = pixel
-	l.modulate = color
-	l.outline_size = 8
-	l.outline_modulate = Color(0.0, 0.0, 0.0, 0.55)
-	l.double_sided = false
-	l.transform = Transform3D(Basis(Vector3.UP, yaw), pos)
-	l.layers = _layers if layers < 0 else layers
-	_area_node.add_child(l)
-	return l
-
-
 func blocker(c: Vector3, s: Vector3) -> void:
 	var sb := StaticBody3D.new()
 	sb.collision_layer = G.PL_GLASS
@@ -492,9 +462,9 @@ func hanging_lamp(pos: Vector3, ceiling_y: float, energy: float, rng: float, sha
 	return omni(pos - Vector3(0, 0.15, 0), Color(1.0, 0.82, 0.6), energy, rng, shadow)
 
 
-func interactable(c: Vector3, mesh: Mesh, mat: Material, coll: Vector3, prompt: String, action: Callable, basis := Basis.IDENTITY) -> Interactable:
+func interactable(c: Vector3, mesh: Mesh, mat: Material, coll: Vector3, node_name: String, action: Callable, basis := Basis.IDENTITY) -> Interactable:
 	var it := Interactable.new()
-	it.prompt = prompt
+	it.name = node_name
 	it.action = action
 	it.collision_layer = G.PL_WORLD
 	it.collision_mask = 0
@@ -525,7 +495,7 @@ func light_switch(c: Vector3, side_normal: Vector3, lights: Array, glow_mats: Ar
 			gm.set_shader_parameter("emission_energy", 6.0 if state[0] else 0.0)
 		if G.sfx:
 			G.sfx.play_at("click", c, -2.0)
-	interactable(c, _bm(vis), M.trim, sz, "Flip light switch", act)
+	interactable(c, _bm(vis), M.trim, sz, "LightSwitch", act)
 
 
 func prop(kind: String, pos: Vector3, yaw := 0.0, color: Variant = null, sleep := true) -> Prop:
@@ -550,7 +520,6 @@ func prop_xf(kind: String, xf: Transform3D, color: Variant = null) -> Prop:
 func duck(pos: Vector3, yaw := 0.0) -> Prop:
 	var d := prop("duck", pos, yaw)
 	d.collectible = true
-	d.prompt = "Squeeze duck"
 	G.ducks_total += 1
 	return d
 
@@ -586,9 +555,6 @@ func _build_foyer() -> void:
 	pt.can_teleport = false
 	frame_around("w", mn, mx, o_w, M.gold, 0.16, 0.08)
 	blocker(Vector3(-4.13, 2.0, 0.0), Vector3(0.14, 2.0, 1.6))
-	box(Vector3(-3.985, 1.55, 1.25), Vector3(0.02, 0.16, 0.5), M.gold, false)
-	sign_label("Study of an Attic,", Vector3(-3.972, 1.575, 1.25), PI * 0.5, 16, Color(0.15, 0.1, 0.05))
-	sign_label("Sideways", Vector3(-3.972, 1.515, 1.25), PI * 0.5, 16, Color(0.15, 0.1, 0.05))
 	# console table under the painting
 	box(Vector3(-3.72, 0.775, 0.0), Vector3(0.5, 0.05, 1.7), M.dark_wood)
 	for z in [-0.78, 0.78]:
@@ -602,11 +568,7 @@ func _build_foyer() -> void:
 	box(hinge + d * 0.6, Vector3(1.18, 2.18, 0.05), M.door_wood, true, true, lb)
 	sphere(hinge + d * 1.05 + lb * Vector3(0, 0, 0.05), 0.035, M.gold, false, false)
 	sphere(hinge + d * 1.05 + lb * Vector3(0, 0, -0.05), 0.035, M.gold, false, false)
-	sign_label("FRONT DOOR", Vector3(0.0, 2.62, 3.965), PI, 34)
 	chandelier(Vector3(0, 3.5, 0), 0.6, 2.4, 12.0, true)
-	sign_label("WELCOME HOME", Vector3(2.3, 2.0, -3.965), 0.0, 52)
-	sign_label("please mind the geometry", Vector3(2.3, 1.76, -3.965), 0.0, 26)
-	sign_label("you are standing in the only normal room", Vector3(-2.3, 1.85, -3.965), 0.0, 20, Color(0.8, 0.75, 0.6))
 	# grandfather clock against the north wall
 	var ck := Vector3(3.35, 0, -3.78)
 	box(ck + Vector3(0, 0.95, 0), Vector3(0.55, 1.9, 0.34), M.dark_wood)
@@ -684,10 +646,6 @@ func _build_hallway() -> void:
 	for x in [-9.0, -5.5, -2.0, 3.0]:
 		painting(Vector3(x, 1.75, -4.4), PI, 0.7, 0.9, i)
 		i += 1
-	sign_label("THE REPEATING ROOM", Vector3(-3.0, 2.7, -7.365), 0.0, 30)
-	sign_label("STAIRS", Vector3(-11.965, 2.7, -5.9), PI * 0.5, 30)
-	sign_label("A WINDOW", Vector3(5.965, 2.62, -5.9), -PI * 0.5, 26)
-	sign_label("FOYER", Vector3(0.0, 2.7, -4.435), PI, 26)
 	# side table with a plant near the window
 	box(Vector3(5.3, 0.75, -7.05), Vector3(0.7, 0.04, 0.45), M.dark_wood)
 	for sx in [-0.3, 0.3]:
@@ -736,7 +694,7 @@ func _build_bedroom() -> void:
 		nl.visible = lamp_on[0]
 		shade_m.set_shader_parameter("emission_energy", 1.5 if lamp_on[0] else 0.0)
 		G.sfx.play_at("click", ns, -3.0)
-	interactable(ns + Vector3(0, 0.8, 0), _bm(Vector3(0.01, 0.01, 0.01)), M.trim, Vector3(0.36, 0.45, 0.36), "Toggle lamp", lamp_act)
+	interactable(ns + Vector3(0, 0.8, 0), _bm(Vector3(0.01, 0.01, 0.01)), M.trim, Vector3(0.36, 0.45, 0.36), "NightstandLamp", lamp_act)
 	# dresser with a music box on top
 	box(Vector3(6.3, 0.45, 3.22), Vector3(1.4, 0.9, 0.5), M.dark_wood)
 	for row in 3:
@@ -783,7 +741,6 @@ func _wardrobe() -> void:
 		box(hinge + dd * 0.25, Vector3(0.03, 2.03, 0.5), w, true, true, b)
 		sphere(hinge + dd * 0.44 + b * Vector3(0.03, 0, 0), 0.022, M.gold, false, false)
 		sphere(hinge + dd * 0.44 + b * Vector3(-0.03, 0, 0), 0.022, M.gold, false, false)
-	sign_label("please close the door", Vector3(x0 - 0.005, 2.22, 0.0), -PI * 0.5, 20, Color(0.95, 0.9, 0.75))
 
 
 # =====================================================================================
@@ -802,8 +759,6 @@ func _build_repeating_room() -> void:
 	portal_for("e", mn, mx, o_e, "RepeatEast", fb, REPEAT_FADE)
 	portal_for("w", mn, mx, o_w, "RepeatWest", fb, REPEAT_FADE)
 	hanging_lamp(Vector3(-3.0, 2.3, -10.8), 3.0, 1.8, 9.0, true)
-	sign_label("YOU ARE HERE", Vector3(-3.0, 1.95, -13.765), 0.0, 44, Color(0.2, 0.12, 0.05))
-	sign_label("(and here, and here, and here...)", Vector3(-3.0, 1.72, -13.765), 0.0, 20, Color(0.25, 0.15, 0.06))
 	box(Vector3(-3.0, 0.006, -10.8), Vector3(2.0, 0.012, 2.0), M.rug_red, false, false)
 	# small shelf on the north wall
 	box(Vector3(-5.0, 1.2, -13.62), Vector3(1.2, 0.04, 0.3), M.dark_wood)
@@ -868,7 +823,6 @@ func _build_stairwell() -> void:
 	var fb := Color(0.04, 0.035, 0.03)
 	var up := make_portal("StairsUp", O + Vector3(1.25, 7.3, -0.01), Vector3(0, 0, 1), Vector3.UP, Vector2(2.5, 2.6), fb)
 	var down := make_portal("StairsDown", O + Vector3(1.25, 1.3, -0.01), Vector3(0, 0, -1), Vector3.UP, Vector2(2.5, 2.6), fb)
-	up.cam_layers = G.VL_WORLD | G.VL_PLAYER_BODY | G.VL_UP_ONLY | G.VL_BODY_CLONE | G.VL_SUN
 	up.on_teleport = func(b):
 		if b == G.player:
 			_floor_changed(1)
@@ -886,11 +840,6 @@ func _build_stairwell() -> void:
 		box(base + Vector3(-w * 0.5 - 0.045, hh * 0.5 + 0.045, dz), Vector3(0.09, hh + 0.09, 0.035), M.wood_trim, false)
 		box(base + Vector3(w * 0.5 + 0.045, hh * 0.5 + 0.045, dz), Vector3(0.09, hh + 0.09, 0.035), M.wood_trim, false)
 		box(base + Vector3(0, hh + 0.045, dz), Vector3(w + 0.18, 0.09, 0.035), M.wood_trim, false)
-	floor_label_main = sign_label("FLOOR 1", O + Vector3(2.7, 5.72, -8.98), 0.0, 44, Color(0.95, 0.88, 0.7), G.VL_MAIN_ONLY)
-	floor_label_up = sign_label("FLOOR 2", O + Vector3(2.7, 5.72, -8.98), 0.0, 44, Color(0.95, 0.88, 0.7), G.VL_UP_ONLY)
-	sign_label("HOUSE", O + Vector3(1.35, 4.4, -8.98), 0.0, 30)
-	sign_label("ATTIC", O + Vector3(2.7, 8.6, 2.98), PI, 34)
-	sign_label("up is up.  down is also up.", O + Vector3(5.38, 7.6, 1.5), -PI * 0.5, 22, Color(0.3, 0.22, 0.12))
 	var warm := Color(1.0, 0.84, 0.62)
 	omni(O + Vector3(2.7, 5.5, -7.5), warm, 1.7, 9.0, true)
 	omni(O + Vector3(2.7, 8.5, 1.5), warm, 1.7, 9.0, true)
@@ -904,32 +853,16 @@ func _build_stairwell() -> void:
 
 func set_floor(n: int) -> void:
 	G.floor_number = n
-	floor_label_main.text = "FLOOR %d" % G.floor_number
-	floor_label_up.text = "FLOOR %d" % (G.floor_number + 1)
 
 
 func _floor_changed(d: int) -> void:
 	set_floor(G.floor_number + d)
-	if G.hud == null:
-		return
-	var msgs := {
-		5: "Your legs feel slightly confused.",
-		10: "Floor 10. The stairs seem pleased with themselves.",
-		20: "Floor 20. Are you sure this goes anywhere?",
-		42: "Floor 42. That feels significant somehow.",
-		50: "Floor 50. The building is one storey tall.",
-		100: "Floor 100. Have a golden duck.",
-		-5: "Floor -5. There is no basement. You are in it anyway.",
-	}
-	if msgs.has(G.floor_number) and (d > 0 or G.floor_number < 0):
-		G.hud.toast(msgs[G.floor_number], 4.5)
-		if G.floor_number == 100:
-			var gd := Props.make("duck", Color(1.0, 0.8, 0.2))
-			var cam: Camera3D = G.player.camera
-			add_spawned(gd, Transform3D(Basis.IDENTITY, cam.global_position - cam.global_transform.basis.z * 1.2))
-			G.sfx.play2d("chime", -3.0, 1.3)
-	else:
-		G.hud.toast("Floor %d" % G.floor_number, 1.4)
+	if d > 0 and G.floor_number == 100:
+		# a reward for whoever keeps climbing
+		var gd := Props.make("duck", Color(1.0, 0.8, 0.2))
+		var cam: Camera3D = G.player.camera
+		add_spawned(gd, Transform3D(Basis.IDENTITY, cam.global_position - cam.global_transform.basis.z * 1.2))
+		G.sfx.play2d("chime", -3.0, 1.3)
 
 
 # =====================================================================================
@@ -976,11 +909,7 @@ func _build_attic() -> void:
 	box(Vector3(-0.83, 0.02, -60.0), Vector3(0.06, 0.04, 2.1), M.wood_trim, false)
 	box(Vector3(0.83, 0.02, -60.0), Vector3(0.06, 0.04, 2.1), M.wood_trim, false)
 	box(Vector3(0, 0.02, -58.97), Vector3(1.72, 0.04, 0.06), M.wood_trim, false)
-	cyl(Vector3(1.4, 0.45, -58.6), 0.025, 0.9, M.dark_wood, true, -1.0, true, Basis.IDENTITY, 6)
-	box(Vector3(1.4, 0.85, -58.58), Vector3(0.55, 0.26, 0.03), M.planter)
-	sign_label("MIND THE GAP", Vector3(1.4, 0.85, -58.56), 0.0, 22, Color(0.2, 0.1, 0.05))
 	portal_for("s", mn, mx, o_s, "AtticDoor")
-	sign_label("STAIRS", Vector3(1.85, 1.7, -56.035), PI, 26)
 	hanging_lamp(Vector3(1.6, 2.9, -60.0), 3.95, 1.8, 10.0, true)
 	omni(Vector3(3.0, 1.9, -57.0), Color(1.0, 0.8, 0.55), 0.5, 5.0, false)
 	# junk
@@ -1054,8 +983,6 @@ func _build_great_hall() -> void:
 	blocker(Vector3(85.13, 7.8, 0.0), Vector3(0.12, 1.6, 1.4))
 	box(Vector3(84.99, 7.8, 0.0), Vector3(0.03, 1.6, 0.04), M.wood_trim, false, false)
 	box(Vector3(84.99, 7.8, 0.0), Vector3(0.03, 0.04, 1.4), M.wood_trim, false, false)
-	sign_label("THE GREAT HALL", Vector3(70.0, 4.2, 19.97), PI, 140, Color(0.85, 0.75, 0.55))
-	sign_label("(this is still inside the wardrobe)", Vector3(70.0, 3.5, 19.97), PI, 40, Color(0.75, 0.68, 0.52))
 	# free-standing door frame in the middle of the hall
 	var fz := 4.0
 	box(Vector3(69.3, 1.225, fz), Vector3(0.2, 2.45, 0.25), M.frame_white)
@@ -1066,8 +993,6 @@ func _build_great_hall() -> void:
 		box(Vector3(sx, 0.05, fz), Vector3(0.3, 0.1, 0.36), M.gold, false)
 	make_portal("HallFrameFront", Vector3(70.0, 1.1, fz), Vector3(0, 0, 1), Vector3.UP, Vector2(1.2, 2.2))
 	make_portal("HallFrameBack", Vector3(70.0, 1.1, fz), Vector3(0, 0, -1), Vector3.UP, Vector2(1.2, 2.2))
-	sign_label("walk around me", Vector3(70.0, 2.75, fz + 0.17), 0.0, 26, Color(0.9, 0.85, 0.7))
-	sign_label("now walk through me", Vector3(70.0, 2.75, fz - 0.17), PI, 26, Color(0.9, 0.85, 0.7))
 	# columns
 	for x in [60.0, 80.0]:
 		for z in [-15.0, -9.0, -3.0, 3.0, 9.0, 15.0]:
@@ -1127,7 +1052,6 @@ func _domino_run() -> void:
 		var basis := Basis.looking_at((q - p).normalized(), Vector3.UP)
 		prop_xf("domino", Transform3D(basis, p + Vector3(0, 0.201, 0)), Color.from_hsv(float(i) / placed.size(), 0.55, 0.95))
 	var first: Vector3 = placed[0]
-	sign_label("PUSH ME", first + Vector3(0, 0.7, -0.4), PI, 30)
 
 
 func _crate_pyramid(base: Vector3) -> void:
@@ -1150,8 +1074,7 @@ func _ball_machine(base: Vector3) -> void:
 	var spout := base + Vector3(0, 6.9, 0)
 	var press := func():
 		_spawn_balls(spout)
-	interactable(bp + Vector3(0, 1.05, 0), m, M.button_red, Vector3(0.36, 0.14, 0.36), "Press the big red button", press)
-	sign_label("DO NOT PRESS", bp + Vector3(0, 0.75, 0.255), 0.0, 24)
+	interactable(bp + Vector3(0, 1.05, 0), m, M.button_red, Vector3(0.36, 0.14, 0.36), "BigRedButton", press)
 
 
 func _spawn_balls(at: Vector3) -> void:
@@ -1175,7 +1098,6 @@ func _trampoline_and_chair() -> void:
 		for sz in [-0.85, 0.85]:
 			box(c + Vector3(sx, 0.9, sz), Vector3(0.16, 1.8, 0.16), w)
 	box(c + Vector3(-0.87, 3.1, 0), Vector3(0.16, 2.3, 1.9), w)
-	sign_label("a normal-sized chair", c + Vector3(0, 1.4, 0.96), 0.0, 30)
 	# trampoline
 	var tp := Vector3(62.3, 0.0, 0.2)
 	var tb := StaticBody3D.new()
@@ -1192,7 +1114,6 @@ func _trampoline_and_chair() -> void:
 	_shape(cs, Transform3D(Basis.IDENTITY, tp + Vector3(0, 0.175, 0)), tb)
 	cyl(tp + Vector3(0, 0.15, 0), 1.2, 0.3, M.metal, false)
 	cyl(tp + Vector3(0, 0.31, 0), 1.05, 0.04, M.trampoline, false)
-	sign_label("BOING", tp + Vector3(0, 0.9, 1.25), 0.0, 30)
 
 
 func _bowling() -> void:
@@ -1204,8 +1125,6 @@ func _bowling() -> void:
 			prop("pin", Vector3(83.5 - r * 0.15 + j * 0.3, 0.201, -14.5 - r * 0.26))
 	prop("bowling_ball", Vector3(83.2, 0.111, 16.5))
 	prop("bowling_ball", Vector3(83.8, 0.111, 16.5))
-	sign_label("BOWLING  (throw with right click)", Vector3(83.5, 1.9, 17.5), 0.0, 30)
-	sign_label("STRIKE ZONE", Vector3(83.5, 1.4, -16.5), 0.0, 30)
 
 
 func _seesaw(c: Vector3) -> void:
@@ -1277,7 +1196,6 @@ func _build_greenhouse() -> void:
 	box(Vector3(0.66, 1.15, 62.92), Vector3(0.12, 2.3, 0.26), fw)
 	box(Vector3(0.0, 2.25, 62.92), Vector3(1.44, 0.1, 0.26), fw)
 	make_portal("GreenhouseDoor", Vector3(0.0, 1.1, 62.99), Vector3(0, 0, 1), Vector3.UP, Vector2(1.2, 2.2))
-	sign_label("THE GREENHOUSE", Vector3(0.0, 3.0, 63.03), 0.0, 60, Color(0.2, 0.3, 0.15))
 	# sunlight (only affects the greenhouse layer)
 	var sun := DirectionalLight3D.new()
 	sun.rotation = Vector3(deg_to_rad(-52.0), deg_to_rad(28.0), 0.0)

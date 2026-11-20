@@ -3,7 +3,6 @@ extends RigidBody3D
 ## A physics toy that can be grabbed, thrown, painted and carried through portals.
 
 var kind := ""
-var prompt := ""
 var action: Callable = Callable()
 var paint_meshes: Array = []
 var collectible := false
@@ -37,18 +36,6 @@ func _on_hit(_other: Node) -> void:
 	_last_snd = now
 	if G.sfx:
 		G.sfx.impact(global_position, v, mass, kind)
-
-
-func has_prompt() -> bool:
-	return action.is_valid() or collectible or kind == "duck"
-
-
-func get_prompt() -> String:
-	if prompt != "":
-		return prompt
-	if kind == "duck":
-		return "Squeeze"
-	return "Use"
 
 
 func interact(_who) -> void:

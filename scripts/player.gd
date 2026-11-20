@@ -423,7 +423,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		fly = not fly
 		velocity = Vector3.ZERO
 		if G.hud:
-			G.hud.toast("Fly mode ON  (walls are optional)" if fly else "Fly mode OFF")
+			G.hud.toast("Fly mode on" if fly else "Fly mode off")
 	elif event.is_action_pressed("clear"):
 		if G.world:
 			G.world.clear_spawned()

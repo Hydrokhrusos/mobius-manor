@@ -1,6 +1,6 @@
 class_name Hud
 extends CanvasLayer
-## Title screen, crosshair, prompts, toasts, help and pause menu.
+## Title screen, crosshair, toasts, help and pause menu.
 
 const CONTROLS := [
 	["WASD", "move"], ["Mouse", "look"], ["Shift", "sprint"], ["Space", "jump"],
@@ -25,12 +25,8 @@ class Crosshair:
 var state := "title"
 var root: Control
 var cross: Crosshair
-var hint: Label
 var toast_lbl: Label
 var toast_t := 0.0
-var area_lbl: Label
-var area_sub: Label
-var area_t := 0.0
 var stats: Label
 var fps_lbl: Label
 var help: PanelContainer
@@ -41,18 +37,6 @@ var sens_slider: HSlider
 var quality_btn: Button
 var show_fps := false
 var _time := 0.0
-
-const AREA_SUBTITLES := {
-	"The Foyer": "where everything starts",
-	"The Long Hallway": "mostly reliable",
-	"The Bedroom": "check the wardrobe",
-	"The Repeating Room": "the room next door is this room",
-	"The Endless Stairwell": "every floor is the same floor",
-	"The Attic": "watch your step",
-	"The Great Hall": "larger than the house around it",
-	"The Greenhouse": "it is always noon in here",
-}
-
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
@@ -67,14 +51,8 @@ func _ready() -> void:
 	cross.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(cross)
 
-	hint = _label(21, Color(1, 1, 1, 0.92))
-	_place(hint, 0, 1, 1, 1, 0, -96, 0, -60)
 	toast_lbl = _label(26, Color(1.0, 0.95, 0.8))
 	_place(toast_lbl, 0, 1, 1, 1, 0, -170, 0, -120)
-	area_lbl = _label(54, Color(1.0, 0.94, 0.8), true)
-	_place(area_lbl, 0, 0, 1, 0, 0, 70, 0, 140)
-	area_sub = _label(22, Color(0.9, 0.85, 0.75), true)
-	_place(area_sub, 0, 0, 1, 0, 0, 138, 0, 170)
 	stats = _label(18, Color(1, 1, 1, 0.8))
 	stats.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	_place(stats, 0, 0, 0.6, 0, 20, 14, 0, 70)
@@ -88,8 +66,6 @@ func _ready() -> void:
 	root.add_child(help)
 	_build_title()
 	_build_pause()
-	area_lbl.modulate.a = 0.0
-	area_sub.modulate.a = 0.0
 
 
 func _label(sz: int, col: Color, serif := false) -> Label:
@@ -232,7 +208,7 @@ func _build_title() -> void:
 	grid.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	pv.add_child(grid)
 	var goal := Label.new()
-	goal.text = "Explore the house. Throw things through doorways. Find the 9 rubber ducks."
+	goal.text = "Find the rubber ducks."
 	goal.add_theme_font_size_override("font_size", 18)
 	goal.add_theme_color_override("font_color", Color(1.0, 0.85, 0.45))
 	goal.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -332,9 +308,6 @@ func start_game(capture := true) -> void:
 	if G.sfx:
 		G.sfx.start_ambience()
 		G.sfx.play2d("chime", -12.0, 0.8)
-	if G.world:
-		area_toast(G.world.current_area() if G.world.current_area() != "" else "The Foyer")
-	toast("Press H for controls", 4.0)
 
 
 func set_paused(p: bool) -> void:
@@ -350,14 +323,6 @@ func toast(text: String, secs := 2.5) -> void:
 	toast_lbl.text = text
 	toast_t = secs
 	toast_lbl.modulate.a = 1.0
-
-
-func area_toast(area: String) -> void:
-	if state == "title":
-		return
-	area_lbl.text = area
-	area_sub.text = AREA_SUBTITLES.get(area, "")
-	area_t = 3.2
 
 
 func _notification(what: int) -> void:
@@ -403,43 +368,22 @@ func _process(delta: float) -> void:
 		title_prompt.modulate.a = 0.55 + 0.45 * sin(_time * 3.0)
 		var gl: Label = title.get_meta("goal_label")
 		if G.ducks_total > 0:
-			gl.text = "Explore the house. Throw things through doorways. Find the %d rubber ducks." % G.ducks_total
+			gl.text = "Find the %d rubber ducks." % G.ducks_total
 	if toast_t > 0.0:
 		toast_t -= rd
 		toast_lbl.modulate.a = clampf(toast_t / 0.5, 0.0, 1.0)
-	if area_t > 0.0:
-		area_t -= rd
-		var a := clampf(minf((3.2 - area_t) / 0.4, area_t / 0.8), 0.0, 1.0)
-		area_lbl.modulate.a = a
-		area_sub.modulate.a = a
 	if G.player == null:
 		return
-	var t := ""
 	var p = G.player
-	if state == "playing":
-		if p.held:
-			t = "[LMB] drop    [RMB] throw    [Wheel] distance    [R] rotate"
-			if p.held.has_method("has_prompt") and p.held.has_prompt():
-				t += "    [E] " + p.held.get_prompt()
-		else:
-			var c = p.look_target()
-			if c != null:
-				var parts := []
-				if c is RigidBody3D and c.is_in_group("grabbable"):
-					parts.append("[LMB] grab")
-				if c is Prop:
-					if c.has_prompt():
-						parts.append("[E] " + c.get_prompt())
-				elif c.has_method("get_prompt"):
-					parts.append("[E] " + c.get_prompt())
-				t = "    ".join(parts)
-	hint.text = t
-	cross.active = t != "" and not p.held
+	# the ring around the crosshair is the only cue that something can be grabbed or used
+	var usable := false
+	if state == "playing" and not p.held:
+		var c = p.look_target()
+		usable = c != null and ((c is RigidBody3D and c.is_in_group("grabbable")) or c.has_method("interact"))
+	cross.active = usable
 	cross.visible = state == "playing"
 	cross.queue_redraw()
 	var s := "Rubber ducks  %d / %d" % [G.ducks_found, G.ducks_total]
-	if G.world and G.world.current_area() == "The Endless Stairwell":
-		s += "      Floor %d" % G.floor_number
 	if G.gravity_mode != 0:
 		s += "      Gravity: " + G.GRAVITY_MODES[G.gravity_mode]
 	if G.slowmo:
