@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2a1f3d"/>
+      <stop offset="1" stop-color="#120d18"/>
+    </linearGradient>
+    <linearGradient id="door" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffe7a8"/>
+      <stop offset="1" stop-color="#f0a849"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="44" fill="url(#bg)"/>
+  <path d="M40 124 L128 48 L216 124 L216 212 L40 212 Z" fill="#5b3a2c" stroke="#e8c88a" stroke-width="8" stroke-linejoin="round"/>
+  <rect x="98" y="122" width="60" height="90" rx="6" fill="url(#door)"/>
+  <rect x="112" y="136" width="32" height="76" rx="4" fill="#2a1f3d"/>
+  <rect x="120" y="148" width="16" height="64" rx="3" fill="url(#door)"/>
+  <rect x="125" y="158" width="6" height="54" rx="2" fill="#2a1f3d"/>
+</svg>
