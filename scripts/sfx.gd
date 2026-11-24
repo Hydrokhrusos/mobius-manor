@@ -3,6 +3,9 @@ extends Node
 ## Procedurally synthesised sound effects (no audio files needed).
 
 const RATE := 22050
+## Footstep variants per floor type, so walking doesn't sound like one sample on repeat.
+const STEP_VARIANTS := 6
+const SURFACES := ["wood", "hard", "soft"]
 
 var streams := {}
 var pool3d: Array = []
@@ -11,6 +14,7 @@ var _i3 := 0
 var _i2 := 0
 var ambience: AudioStreamPlayer
 var _mb_thread: Thread
+var _last_step := -1
 
 
 func _ready() -> void:
@@ -20,7 +24,6 @@ func _ready() -> void:
 	streams["thud"] = _wav(_thud(rng))
 	streams["knock"] = _wav(_knock(rng, 1.0))
 	streams["clink"] = _wav(_knock(rng, 3.2))
-	streams["step"] = _wav(_step(rng))
 	streams["whoosh"] = _wav(_whoosh(rng))
 	streams["click"] = _wav(_click())
 	streams["grab"] = _wav(_grab(rng))
@@ -32,6 +35,12 @@ func _ready() -> void:
 	streams["ambience"] = _wav(_ambience(rng), true)
 	streams["tick"] = _wav(_tick(rng), true)
 	streams["birds"] = _wav(_birds(rng), true)
+	var frng := RandomNumberGenerator.new()
+	frng.seed = 4321
+	for surf in SURFACES:
+		for i in STEP_VARIANTS:
+			streams["step_%s_%d" % [surf, i]] = _wav(_footstep(frng, surf))
+		streams["land_" + surf] = _wav(_landing(frng, surf))
 	for i in 16:
 		var p := AudioStreamPlayer3D.new()
 		p.unit_size = 4.0
@@ -97,6 +106,21 @@ func play2d(n: String, vol_db: float = 0.0, pitch: float = 1.0) -> void:
 	p.play()
 
 
+## One of the player's own footsteps on a "wood", "hard" (stone, tile) or "soft" (rug) floor.
+func footstep(surface: String, vol_db: float) -> void:
+	var i := randi() % STEP_VARIANTS
+	if i == _last_step:
+		i = (i + 1) % STEP_VARIANTS
+	_last_step = i
+	play2d("step_%s_%d" % [surface, i], vol_db + randf_range(-1.5, 1.0), randf_range(0.95, 1.05))
+
+
+## Both feet hitting the floor after a jump or fall, louder the faster you came down.
+func landing(surface: String, fall_speed: float) -> void:
+	var vol := linear_to_db(clampf(fall_speed / 10.0, 0.3, 1.0)) - 8.0
+	play2d("land_" + surface, vol, randf_range(0.95, 1.04))
+
+
 func impact(pos: Vector3, speed: float, mass: float, kind: String) -> void:
 	var n := "thud"
 	var pitch := 1.0
@@ -134,6 +158,65 @@ func _wav(samples: PackedFloat32Array, loop := false) -> AudioStreamWAV:
 	return w
 
 
+func _noise(rng: RandomNumberGenerator, sec: float) -> PackedFloat32Array:
+	var a := _buf(sec)
+	for i in a.size():
+		a[i] = rng.randf_range(-1.0, 1.0)
+	return a
+
+
+## Biquad band-pass (RBJ audio cookbook, constant peak gain).
+func _bandpass(src: PackedFloat32Array, f0: float, q: float) -> PackedFloat32Array:
+	var w0 := TAU * f0 / RATE
+	var alpha := sin(w0) / (2.0 * q)
+	var a0 := 1.0 + alpha
+	var b0 := alpha / a0
+	var a1 := -2.0 * cos(w0) / a0
+	var a2 := (1.0 - alpha) / a0
+	var out := PackedFloat32Array()
+	out.resize(src.size())
+	var x1 := 0.0
+	var x2 := 0.0
+	var y1 := 0.0
+	var y2 := 0.0
+	for i in src.size():
+		var x := src[i]
+		var y := b0 * (x - x2) - a1 * y1 - a2 * y2
+		x2 = x1
+		x1 = x
+		y2 = y1
+		y1 = y
+		out[i] = y
+	return out
+
+
+## A couple of early reflections, for sounds in big hard-floored rooms.
+func _echo(src: PackedFloat32Array) -> PackedFloat32Array:
+	var out := src.duplicate()
+	for d in [[0.019, 0.22], [0.031, 0.14], [0.047, 0.08]]:
+		var n := int(d[0] * RATE)
+		for i in range(n, src.size()):
+			out[i] += src[i - n] * d[1]
+	return out
+
+
+## Scale to the given peak (or to the given RMS level, without going over that peak) and
+## fade the last few milliseconds so the end doesn't click.
+func _finish(a: PackedFloat32Array, peak: float, rms := 0.0) -> PackedFloat32Array:
+	var m := 0.0001
+	var e := 0.0
+	for v in a:
+		m = maxf(m, absf(v))
+		e += v * v
+	var k := peak / m
+	if rms > 0.0:
+		k = minf(k, rms / maxf(sqrt(e / a.size()), 0.0001))
+	var fade := int(0.015 * RATE)
+	for i in a.size():
+		a[i] *= k * clampf(float(a.size() - 1 - i) / fade, 0.0, 1.0)
+	return a
+
+
 func _buf(sec: float) -> PackedFloat32Array:
 	var a := PackedFloat32Array()
 	a.resize(int(sec * RATE))
@@ -165,14 +248,70 @@ func _knock(rng: RandomNumberGenerator, k: float) -> PackedFloat32Array:
 	return a
 
 
-func _step(rng: RandomNumberGenerator) -> PackedFloat32Array:
-	var a := _buf(0.11)
-	var lp := 0.0
+## A heel strike followed by the toe rolling down. Wood is a dull knock with a little
+## board ring, stone and tile a sharper tap with a short room echo, rugs a muffled thump.
+func _footstep(rng: RandomNumberGenerator, surface: String) -> PackedFloat32Array:
+	var noise := _noise(rng, 0.2)
+	var heel_f: float = {"wood": rng.randf_range(300.0, 450.0), "hard": rng.randf_range(650.0, 950.0), "soft": rng.randf_range(160.0, 240.0)}[surface]
+	var toe_f: float = {"wood": rng.randf_range(1400.0, 2200.0), "hard": rng.randf_range(1700.0, 2400.0), "soft": rng.randf_range(500.0, 800.0)}[surface]
+	var heel := _bandpass(noise, heel_f, 0.9)
+	var toe := _bandpass(noise, toe_f, 1.2)
+	var heel_tau: float = {"wood": 0.016, "hard": 0.008, "soft": 0.02}[surface]
+	var body_f: float = {"wood": rng.randf_range(95.0, 120.0), "hard": rng.randf_range(70.0, 85.0), "soft": rng.randf_range(65.0, 80.0)}[surface]
+	var body_amp: float = {"wood": 0.3, "hard": 0.12, "soft": 0.25}[surface]
+	var ring_f := rng.randf_range(190.0, 260.0)
+	var ring_f2 := rng.randf_range(430.0, 600.0)
+	var toe_t := rng.randf_range(0.04, 0.065)
+	var toe_amp := rng.randf_range(0.3, 0.5) * (0.5 if surface == "soft" else 1.0)
+	var a := PackedFloat32Array()
+	a.resize(noise.size())
+	var ph := 0.0
 	for i in a.size():
 		var t := float(i) / RATE
-		lp += (rng.randf_range(-1, 1) - lp) * 0.08
-		a[i] = (lp * 2.2 + 0.4 * sin(TAU * 85.0 * t)) * exp(-t * 45.0) * 0.7
-	return a
+		var att := minf(t / 0.0015, 1.0)
+		var s := heel[i] * att * exp(-t / heel_tau) * 3.0
+		ph += TAU * body_f * (1.0 + 0.6 * exp(-t / 0.01)) / RATE
+		s += sin(ph) * att * exp(-t / 0.022) * body_amp
+		if surface == "wood":
+			s += (sin(TAU * ring_f * t) * 0.08 + sin(TAU * ring_f2 * t) * 0.04) * att * exp(-t / 0.035)
+		elif surface == "hard":
+			s += noise[i] * exp(-t / 0.001) * 0.2
+		var tt := t - toe_t
+		if tt > 0.0:
+			s += toe[i] * minf(tt / 0.003, 1.0) * exp(-tt / 0.012) * toe_amp * 3.0
+		a[i] = s
+	if surface == "hard":
+		a = _echo(a)
+	# matched by loudness rather than peak, so no variant stands out
+	return _finish(a, 0.95, {"wood": 0.095, "hard": 0.065, "soft": 0.09}[surface])
+
+
+func _landing(rng: RandomNumberGenerator, surface: String) -> PackedFloat32Array:
+	var noise := _noise(rng, 0.32)
+	var heel_f: float = {"wood": 260.0, "hard": 750.0, "soft": 150.0}[surface]
+	var heel := _bandpass(noise, heel_f, 0.8)
+	var heel_tau: float = {"wood": 0.025, "hard": 0.012, "soft": 0.03}[surface]
+	var body_amp: float = {"wood": 0.6, "hard": 0.3, "soft": 0.5}[surface]
+	var ring_f := rng.randf_range(170.0, 220.0)
+	var a := PackedFloat32Array()
+	a.resize(noise.size())
+	var ph := 0.0
+	for i in a.size():
+		var t := float(i) / RATE
+		var s := 0.0
+		# two feet, a moment apart
+		for k in 2:
+			var tk := t - k * 0.014
+			if tk > 0.0:
+				s += heel[i] * minf(tk / 0.002, 1.0) * exp(-tk / heel_tau) * (3.0 if k == 0 else 2.1)
+		ph += TAU * 62.0 * (1.0 + 0.8 * exp(-t / 0.012)) / RATE
+		s += sin(ph) * minf(t / 0.003, 1.0) * exp(-t / 0.045) * body_amp
+		if surface == "wood":
+			s += sin(TAU * ring_f * t) * minf(t / 0.002, 1.0) * exp(-t / 0.05) * 0.12
+		a[i] = s
+	if surface == "hard":
+		a = _echo(a)
+	return _finish(a, 0.9)
 
 
 func _whoosh(rng: RandomNumberGenerator) -> PackedFloat32Array:

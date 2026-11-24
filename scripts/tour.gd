@@ -193,6 +193,12 @@ func _interact_test() -> void:
 	print("INTERACT ducks found %d / %d" % [G.ducks_found, G.ducks_total])
 	var cube := _find_prop("cube")
 	cube.paint(Color.RED)
+	print("INTERACT footsteps played during the walks: %s" % (G.sfx._last_step >= 0))
+	var floors := []
+	for f in [["foyer", Vector3(3.0, 0.01, 0.0)], ["foyer rug", Vector3(0.0, 0.01, 0.0)], ["hallway", Vector3(-3.0, 0.01, -4.8)],
+			["hallway runner", Vector3(-3.0, 0.01, -5.9)], ["attic", Vector3(0.0, 0.01, -60.0)], ["greenhouse", Vector3(0.0, 0.01, 1070.0)]]:
+		floors.append("%s=%s" % [f[0], G.world.floor_surface(f[1])])
+	print("INTERACT floors: " + ", ".join(floors))
 	# the key hints under the crosshair
 	var lamp_p: Prop = await _oob_grab("lamp", Vector3(0, 0.05, -2.2), PI)
 	if lamp_p:

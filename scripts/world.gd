@@ -27,6 +27,10 @@ var _layers := 1
 var _off := Vector3.ZERO
 var _cur_area := ""
 var _cleanup_t := 0.0
+## Rooms with stone or tile floors (the rest are wooden), and the rugs on them. Only
+## used to pick footstep sounds.
+const HARD_FLOORS := ["The Foyer", "The Repeating Room", "The Great Hall", "The Greenhouse"]
+var _rugs: Array = []
 ## Props that end up outside every room are put back where they started (the debug tour
 ## turns this off to check that nothing gets out in the first place).
 var oob_recovery := true
@@ -90,6 +94,14 @@ func _return_prop(rb: RigidBody3D) -> void:
 
 func current_area() -> String:
 	return _cur_area
+
+
+## What the floor at a point sounds like underfoot: "soft" (a rug), "hard" or "wood".
+func floor_surface(p: Vector3) -> String:
+	for r in _rugs:
+		if (r as AABB).has_point(p):
+			return "soft"
+	return "hard" if area_at(p) in HARD_FLOORS else "wood"
 
 
 func area_at(p: Vector3) -> String:
@@ -227,6 +239,11 @@ func box(c: Vector3, s: Vector3, mat: Material, collide := true, shadow := true,
 		bs.size = s
 		_shape(bs, Transform3D(basis, c))
 	return n
+
+
+func rug(c: Vector3, s: Vector3, mat: Material) -> void:
+	box(c, s, mat, false, false)
+	_rugs.append(AABB(c + _off - s * 0.5 - Vector3(0.0, 0.1, 0.0), s + Vector3(0.0, 0.3, 0.0)))
 
 
 func cbox(c: Vector3, s: Vector3, basis := Basis.IDENTITY, body: CollisionObject3D = null) -> void:
@@ -661,7 +678,7 @@ func _build_foyer() -> void:
 	cyl(cr + Vector3(0.12, 1.78, 0.05), 0.2, 0.015, M.black, false)
 	# bench along the south wall
 	_bench(Vector3(-2.4, 0, 3.65), 2.0)
-	box(Vector3(0, 0.006, 0.2), Vector3(3.0, 0.012, 4.6), M.rug_red, false, false)
+	rug(Vector3(0, 0.006, 0.2), Vector3(3.0, 0.012, 4.6), M.rug_red)
 	# toys
 	prop("crate", Vector3(2.6, 0.305, 2.7), 0.3)
 	prop("crate", Vector3(3.3, 0.305, 2.95), -0.2)
@@ -702,7 +719,7 @@ func _build_hallway() -> void:
 	box(Vector3(5.99, 1.6, -5.9), Vector3(0.03, 0.04, 1.4), M.wood_trim, false, false)
 	for x in [-9.0, -3.0, 3.0]:
 		ceiling_lamp(Vector3(x, 3.0, -5.9), 1.4, 7.5, x == -3.0)
-	box(Vector3(-3.0, 0.006, -5.9), Vector3(17.0, 0.012, 1.1), M.runner, false, false)
+	rug(Vector3(-3.0, 0.006, -5.9), Vector3(17.0, 0.012, 1.1), M.runner)
 	var i := 0
 	for x in [-9.5, -6.5, 1.0, 3.6]:
 		painting(Vector3(x, 1.75, -7.4), 0.0, 0.9, 0.65, i)
@@ -774,7 +791,7 @@ func _build_bedroom() -> void:
 	for sy in [-0.58, 0.0, 0.58]:
 		box(Vector3(9.0, 1.7 + sy, wz - 0.02), Vector3(1.42, 0.06, 0.04), M.trim, false, false)
 	box(Vector3(9.0, 1.1, wz - 0.06), Vector3(1.5, 0.05, 0.14), M.trim, false)
-	box(Vector3(8.3, 0.006, 0.6), Vector3(2.4, 0.012, 1.8), M.rug_blue, false, false)
+	rug(Vector3(8.3, 0.006, 0.6), Vector3(2.4, 0.012, 1.8), M.rug_blue)
 	_wardrobe()
 	prop("chair", Vector3(7.2, 0.475, 2.6), 2.8)
 	prop("ball", Vector3(8.8, 0.19, -1.0), 0.0, Color(0.95, 0.75, 0.15))
@@ -823,7 +840,7 @@ func _build_repeating_room() -> void:
 	portal_for("e", mn, mx, o_e, "RepeatEast", fb, REPEAT_FADE)
 	portal_for("w", mn, mx, o_w, "RepeatWest", fb, REPEAT_FADE)
 	hanging_lamp(Vector3(-3.0, 2.3, -10.8), 3.0, 1.8, 9.0, true)
-	box(Vector3(-3.0, 0.006, -10.8), Vector3(2.0, 0.012, 2.0), M.rug_red, false, false)
+	rug(Vector3(-3.0, 0.006, -10.8), Vector3(2.0, 0.012, 2.0), M.rug_red)
 	# small shelf on the north wall
 	box(Vector3(-5.0, 1.2, -13.62), Vector3(1.2, 0.04, 0.3), M.dark_wood)
 	prop("book", Vector3(-5.35, 1.341, -13.62), 0.0)
@@ -1079,7 +1096,7 @@ func _build_great_hall() -> void:
 	for c in [Vector3(63, 12, -12), Vector3(77, 12, -12), Vector3(63, 12, 12), Vector3(77, 12, 12)]:
 		chandelier(c, 3.4, 2.6, 15.0, false, 1.4)
 	omni(Vector3(70.0, 3.0, 18.5), Color(1.0, 0.84, 0.64), 1.0, 7.0, false)
-	box(Vector3(70.0, 0.006, 12.0), Vector3(2.4, 0.012, 15.5), M.rug_red, false, false)
+	rug(Vector3(70.0, 0.006, 12.0), Vector3(2.4, 0.012, 15.5), M.rug_red)
 	_domino_run()
 	_crate_pyramid(Vector3(72.0, 0.0, -15.0))
 	_ball_machine(Vector3(75.5, 0.0, 13.0))

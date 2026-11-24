@@ -279,18 +279,30 @@ func _after_move(dt: float) -> void:
 			if G.sfx:
 				G.sfx.play_at("boing", global_position, -2.0, randf_range(0.9, 1.1))
 	var on_floor := is_on_floor()
-	if on_floor and not was_on_floor and last_fall_speed > 5.0 and G.sfx:
-		G.sfx.play2d("step", -4.0, 0.7)
+	if on_floor and not was_on_floor:
+		if last_fall_speed > 3.5 and G.sfx:
+			G.sfx.landing(_floor_surface(), last_fall_speed)
+		step_accum = 0.0
 	was_on_floor = on_floor
-	if on_floor:
+	if on_floor and not fly:
 		var hs := Vector2(velocity.x, velocity.z).length()
+		# longer strides the faster you go: about 0.6 s between steps crouching,
+		# 0.4 s walking and 0.33 s sprinting
+		var stride := clampf(0.9 + hs * 0.21, 1.2, 2.4)
 		if hs > 0.8:
 			step_accum += hs * dt
-			var stride := 2.4 if hs > 5.0 else 1.8
 			if step_accum > stride:
-				step_accum = 0.0
+				step_accum = fmod(step_accum - stride, stride)
 				if G.sfx:
-					G.sfx.play2d("step", -14.0 if crouching else -9.0, randf_range(0.85, 1.15))
+					var vol := -21.0 if crouching else (-15.0 if hs > 5.0 else -17.0)
+					G.sfx.footstep(_floor_surface(), vol)
+		else:
+			# standing still: the first step lands shortly after you set off
+			step_accum = 1.0
+
+
+func _floor_surface() -> String:
+	return G.world.floor_surface(global_position) if G.world else "wood"
 
 
 ## Portal links pick up a little float error each time they are combined (the greenhouse
