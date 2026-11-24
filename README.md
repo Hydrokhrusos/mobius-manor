@@ -15,8 +15,8 @@ Everything — rooms, furniture, textures and sounds — is generated procedural
 | The Long Hallway | Its window looks down into the Great Hall from seven metres up. |
 | The Bedroom | The wardrobe is bigger on the inside. Much bigger. |
 | The Great Hall | A free-standing door frame: the front shows a sunny greenhouse, the back shows the foyer. Walk around it. |
-| The Repeating Room | The east door leads in through the west door. You can see yourself. |
-| The Endless Stairwell | The top landing is the bottom landing. Keep climbing and count the floors. |
+| The Room | The east door leads in through the west door. You can see yourself. |
+| The Stairwell | The top landing is the bottom landing. Keep climbing and count the floors. |
 | The Attic | Fall through the trapdoor and get spat out of the painting downstairs. |
 | The Greenhouse | It is always noon in here. |
 

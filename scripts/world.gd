@@ -29,7 +29,7 @@ var _cur_area := ""
 var _cleanup_t := 0.0
 ## Rooms with stone or tile floors (the rest are wooden), and the rugs on them. Only
 ## used to pick footstep sounds.
-const HARD_FLOORS := ["The Foyer", "The Repeating Room", "The Great Hall", "The Greenhouse"]
+const HARD_FLOORS := ["The Foyer", "The Room", "The Great Hall", "The Greenhouse"]
 var _rugs: Array = []
 ## Props that end up outside every room are put back where they started (the debug tour
 ## turns this off to check that nothing gets out in the first place).
@@ -825,11 +825,11 @@ func _wardrobe() -> void:
 
 
 # =====================================================================================
-# The Repeating Room (east and west doors lead into each other)
+# The Room (east and west doors lead into each other)
 # =====================================================================================
 
 func _build_repeating_room() -> void:
-	_begin("The Repeating Room", Vector3(-6.3, -1.0, -14.1), Vector3(0.3, 4.0, -7.62))
+	_begin("The Room", Vector3(-6.3, -1.0, -14.1), Vector3(0.3, 4.0, -7.62))
 	var mn := Vector3(-5.99, 0, -13.8)
 	var mx := Vector3(-0.01, 3.0, -7.8)
 	var o_s := op("s", -3.0, 1.4, 2.4)
@@ -854,12 +854,12 @@ func _build_repeating_room() -> void:
 
 
 # =====================================================================================
-# The Endless Stairwell (the top landing is also the bottom landing)
+# The Stairwell (the top landing is also the bottom landing)
 # =====================================================================================
 
 func _build_stairwell() -> void:
 	var O := Vector3(-60, 0, 0)
-	_begin("The Endless Stairwell", O + Vector3(-0.3, -1.0, -9.4), O + Vector3(5.7, 10.0, 3.4))
+	_begin("The Stairwell", O + Vector3(-0.3, -1.0, -9.4), O + Vector3(5.7, 10.0, 3.4))
 	var mw: Material = M.stair_wall
 	var mf: Material = M.stair_floor
 	var ms: Material = M.stair_step
