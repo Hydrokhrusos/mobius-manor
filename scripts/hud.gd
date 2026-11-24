@@ -7,7 +7,7 @@ const CONTROLS := [
 	["Ctrl", "crouch"], ["LMB", "grab / drop"], ["RMB", "throw"], ["Wheel", "hold distance"],
 	["E", "use / squeeze"], ["R", "rotate held"], ["C", "paint"], ["X", "delete"],
 	["1-9", "spawn toys"], ["0", "clear spawned"], ["G", "gravity"], ["T", "slow motion"],
-	["F", "flashlight"], ["V", "fly / noclip"], ["H", "help"], ["Esc", "pause"],
+	["F", "flashlight"], ["H", "help"], ["Esc", "pause"],
 ]
 
 class Crosshair:
@@ -423,8 +423,6 @@ func _process(delta: float) -> void:
 		s += "      Gravity: " + G.GRAVITY_MODES[G.gravity_mode]
 	if G.slowmo:
 		s += "      Slow motion"
-	if p.fly:
-		s += "      Flying"
 	stats.text = s
 	stats.visible = state != "title"
 	if show_fps:

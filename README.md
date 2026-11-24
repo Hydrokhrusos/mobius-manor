@@ -34,9 +34,9 @@ Find the 8 rubber ducks hidden around the house.
 | C | paint | X | delete |
 | 1–9 | spawn crate, ball, beach ball, duck, domino, chair, cube, pin, lamp | 0 | clear spawned |
 | G | cycle gravity (normal / moon / zero) | T | slow motion |
-| F | flashlight | V | fly / noclip |
-| H | help | F11 | fullscreen |
-| Esc | pause menu (sensitivity, portal quality, quit) | F3 | FPS counter |
+| F | flashlight | H | help |
+| F11 | fullscreen | F3 | FPS counter |
+| Esc | pause menu (sensitivity, portal quality, quit) | | |
 
 ## How the portals work
 

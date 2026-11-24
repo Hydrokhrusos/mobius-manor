@@ -70,7 +70,6 @@ func _setup_input() -> void:
 	_key("gravity", [KEY_G])
 	_key("slowmo", [KEY_T])
 	_key("flashlight", [KEY_F])
-	_key("fly", [KEY_V])
 	_key("help", [KEY_H, KEY_F1])
 	_key("rotate", [KEY_R])
 	_key("fullscreen", [KEY_F11])

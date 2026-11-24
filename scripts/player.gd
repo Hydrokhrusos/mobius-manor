@@ -26,7 +26,6 @@ var body_vis: Node3D
 var head_vis: Node3D
 var cur_h := STAND_H
 var crouching := false
-var fly := false
 var coyote := 0.0
 var jump_buffer := 0.0
 var step_accum := 0.0
@@ -204,17 +203,6 @@ func _move(dt: float, active: bool) -> void:
 	var wish := Basis(Vector3.UP, yaw) * Vector3(iv.x, 0.0, iv.y)
 	if wish.length() > 1.0:
 		wish = wish.normalized()
-	if fly:
-		var dir := camera.global_transform.basis * Vector3(iv.x, 0.0, iv.y)
-		if active and Input.is_action_pressed("jump"):
-			dir += Vector3.UP
-		if active and Input.is_action_pressed("crouch"):
-			dir += Vector3.DOWN
-		var spd := 13.0 if Input.is_action_pressed("sprint") else 6.0
-		var tv := dir.normalized() * spd if dir.length() > 0.01 else Vector3.ZERO
-		velocity = velocity.lerp(tv, 1.0 - exp(-8.0 * dt))
-		global_position += velocity * dt
-		return
 
 	var on_floor := is_on_floor()
 	if on_floor:
@@ -284,7 +272,7 @@ func _after_move(dt: float) -> void:
 			G.sfx.landing(_floor_surface(), last_fall_speed)
 		step_accum = 0.0
 	was_on_floor = on_floor
-	if on_floor and not fly:
+	if on_floor:
 		var hs := Vector2(velocity.x, velocity.z).length()
 		# longer strides the faster you go: about 0.6 s between steps crouching,
 		# 0.4 s walking and 0.33 s sprinting
@@ -332,7 +320,7 @@ func _update_releasing() -> void:
 
 
 func _update_crouch(dt: float, active: bool) -> void:
-	var want := active and Input.is_action_pressed("crouch") and not fly
+	var want := active and Input.is_action_pressed("crouch")
 	if not want and cur_h < STAND_H - 0.01:
 		var space := get_world_3d().direct_space_state
 		var from := global_position + Vector3(0.0, cur_h - 0.05, 0.0)
@@ -464,11 +452,6 @@ func _unhandled_input(event: InputEvent) -> void:
 		flashlight.visible = not flashlight.visible
 		if G.sfx:
 			G.sfx.play2d("click", -6.0)
-	elif event.is_action_pressed("fly"):
-		fly = not fly
-		velocity = Vector3.ZERO
-		if G.hud:
-			G.hud.toast("Fly mode on" if fly else "Fly mode off")
 	elif event.is_action_pressed("clear"):
 		if G.world:
 			G.world.clear_spawned()
