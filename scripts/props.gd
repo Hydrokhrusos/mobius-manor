@@ -221,6 +221,7 @@ static func make(kind: String, color: Variant = null) -> Prop:
 			b.light.position = Vector3(0, 0.18, 0)
 			b.add_child(b.light)
 			b.mass = 1.5
+			b.prompt = "Toggle lamp"
 			b.action = func(p: Prop):
 				p.light.visible = not p.light.visible
 				var mi: MeshInstance3D = p.paint_meshes[0]
@@ -243,6 +244,7 @@ static func make(kind: String, color: Variant = null) -> Prop:
 			b.audio.add_to_group("portal_audio")
 			b.add_child(b.audio)
 			b.mass = 1.0
+			b.prompt = "Wind music box"
 			b.action = func(p: Prop):
 				if p.audio.playing:
 					p.audio.stop()

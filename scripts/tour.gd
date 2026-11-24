@@ -193,6 +193,17 @@ func _interact_test() -> void:
 	print("INTERACT ducks found %d / %d" % [G.ducks_found, G.ducks_total])
 	var cube := _find_prop("cube")
 	cube.paint(Color.RED)
+	# the key hints under the crosshair
+	var lamp_p: Prop = await _oob_grab("lamp", Vector3(0, 0.05, -2.2), PI)
+	if lamp_p:
+		G.player.drop()
+		lamp_p.freeze = true
+		await _frames(3)
+		print("INTERACT hint aiming at a lamp: '%s'" % G.hud.hint.text)
+		G.player.try_grab()
+		await _frames(3)
+		print("INTERACT hint holding the lamp: '%s'" % G.hud.hint.text)
+		G.player.drop()
 	G.world.clear_spawned()
 	await _frames(5)
 	print("INTERACT cleared, spawned count %d" % G.world.spawned_root.get_child_count())

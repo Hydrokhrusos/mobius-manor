@@ -1,6 +1,6 @@
 class_name Hud
 extends CanvasLayer
-## Title screen, crosshair, toasts, help and pause menu.
+## Title screen, crosshair, prompts, toasts, help and pause menu.
 
 const CONTROLS := [
 	["WASD", "move"], ["Mouse", "look"], ["Shift", "sprint"], ["Space", "jump"],
@@ -25,8 +25,11 @@ class Crosshair:
 var state := "title"
 var root: Control
 var cross: Crosshair
+var hint: Label
 var toast_lbl: Label
 var toast_t := 0.0
+var area_lbl: Label
+var area_t := 0.0
 var stats: Label
 var fps_lbl: Label
 var help: PanelContainer
@@ -51,8 +54,12 @@ func _ready() -> void:
 	cross.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(cross)
 
+	hint = _label(21, Color(1, 1, 1, 0.92))
+	_place(hint, 0, 1, 1, 1, 0, -96, 0, -60)
 	toast_lbl = _label(26, Color(1.0, 0.95, 0.8))
 	_place(toast_lbl, 0, 1, 1, 1, 0, -170, 0, -120)
+	area_lbl = _label(54, Color(1.0, 0.94, 0.8), true)
+	_place(area_lbl, 0, 0, 1, 0, 0, 70, 0, 140)
 	stats = _label(18, Color(1, 1, 1, 0.8))
 	stats.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	_place(stats, 0, 0, 0.6, 0, 20, 14, 0, 70)
@@ -66,6 +73,7 @@ func _ready() -> void:
 	root.add_child(help)
 	_build_title()
 	_build_pause()
+	area_lbl.modulate.a = 0.0
 
 
 func _label(sz: int, col: Color, serif := false) -> Label:
@@ -308,6 +316,9 @@ func start_game(capture := true) -> void:
 	if G.sfx:
 		G.sfx.start_ambience()
 		G.sfx.play2d("chime", -12.0, 0.8)
+	if G.world:
+		area_toast(G.world.current_area() if G.world.current_area() != "" else "The Foyer")
+	toast("Press H for controls", 4.0)
 
 
 func set_paused(p: bool) -> void:
@@ -323,6 +334,13 @@ func toast(text: String, secs := 2.5) -> void:
 	toast_lbl.text = text
 	toast_t = secs
 	toast_lbl.modulate.a = 1.0
+
+
+func area_toast(area: String) -> void:
+	if state == "title":
+		return
+	area_lbl.text = area
+	area_t = 3.2
 
 
 func _notification(what: int) -> void:
@@ -372,15 +390,32 @@ func _process(delta: float) -> void:
 	if toast_t > 0.0:
 		toast_t -= rd
 		toast_lbl.modulate.a = clampf(toast_t / 0.5, 0.0, 1.0)
+	if area_t > 0.0:
+		area_t -= rd
+		area_lbl.modulate.a = clampf(minf((3.2 - area_t) / 0.4, area_t / 0.8), 0.0, 1.0)
 	if G.player == null:
 		return
+	var t := ""
 	var p = G.player
-	# the ring around the crosshair is the only cue that something can be grabbed or used
-	var usable := false
-	if state == "playing" and not p.held:
-		var c = p.look_target()
-		usable = c != null and ((c is RigidBody3D and c.is_in_group("grabbable")) or c is Interactable or (c is Prop and c.is_usable()))
-	cross.active = usable
+	if state == "playing":
+		if p.held:
+			t = "[LMB] drop    [RMB] throw    [Wheel] distance    [R] rotate"
+			if p.held is Prop and p.held.has_prompt():
+				t += "    [E] " + p.held.get_prompt()
+		else:
+			var c = p.look_target()
+			if c != null:
+				var parts := []
+				if c is RigidBody3D and c.is_in_group("grabbable"):
+					parts.append("[LMB] grab")
+				if c is Prop:
+					if c.has_prompt():
+						parts.append("[E] " + c.get_prompt())
+				elif c is Interactable:
+					parts.append("[E] " + c.get_prompt())
+				t = "    ".join(parts)
+	hint.text = t
+	cross.active = t != "" and not p.held
 	cross.visible = state == "playing"
 	cross.queue_redraw()
 	var s := "Rubber ducks  %d / %d" % [G.ducks_found, G.ducks_total]

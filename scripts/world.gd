@@ -25,6 +25,7 @@ var _area_node: Node3D
 var _body: StaticBody3D
 var _layers := 1
 var _off := Vector3.ZERO
+var _cur_area := ""
 var _cleanup_t := 0.0
 ## Props that end up outside every room are put back where they started (the debug tour
 ## turns this off to check that nothing gets out in the first place).
@@ -53,8 +54,15 @@ func build() -> void:
 func _process(delta: float) -> void:
 	if G.player == null:
 		return
+	var a := area_at(G.player.global_position)
+	if a != "" and a != _cur_area:
+		_cur_area = a
+		if G.hud:
+			G.hud.area_toast(a)
 	if G.player.global_position.y < -40.0:
 		G.player.place(spawn_pos, spawn_yaw)
+		if G.hud:
+			G.hud.toast("The house catches you and puts you back.", 3.0)
 	_cleanup_t += delta
 	if _cleanup_t > 0.5 and oob_recovery:
 		_cleanup_t = 0.0
@@ -78,6 +86,10 @@ func _return_prop(rb: RigidBody3D) -> void:
 	if G.portal_manager:
 		G.portal_manager.reset_body(rb)
 	update_body_layers(rb)
+
+
+func current_area() -> String:
+	return _cur_area
 
 
 func area_at(p: Vector3) -> String:
@@ -287,6 +299,22 @@ func omni(pos: Vector3, color: Color, energy: float, rng: float, shadow := false
 	return l
 
 
+func sign_label(text: String, pos: Vector3, yaw: float, px := 48, color := Color(0.95, 0.88, 0.7), layers := -1, pixel := 0.0035) -> Label3D:
+	var l := Label3D.new()
+	l.text = text
+	l.font = G.serif_font
+	l.font_size = px
+	l.pixel_size = pixel
+	l.modulate = color
+	l.outline_size = 8
+	l.outline_modulate = Color(0.0, 0.0, 0.0, 0.55)
+	l.double_sided = false
+	l.transform = Transform3D(Basis(Vector3.UP, yaw), pos)
+	l.layers = _layers if layers < 0 else layers
+	_area_node.add_child(l)
+	return l
+
+
 func blocker(c: Vector3, s: Vector3) -> void:
 	var sb := StaticBody3D.new()
 	sb.collision_layer = G.PL_GLASS
@@ -491,9 +519,10 @@ func hanging_lamp(pos: Vector3, ceiling_y: float, energy: float, rng: float, sha
 	return omni(pos - Vector3(0, 0.15, 0), Color(1.0, 0.82, 0.6), energy, rng, shadow)
 
 
-func interactable(c: Vector3, mesh: Mesh, mat: Material, coll: Vector3, node_name: String, action: Callable, basis := Basis.IDENTITY) -> Interactable:
+func interactable(c: Vector3, mesh: Mesh, mat: Material, coll: Vector3, node_name: String, prompt: String, action: Callable, basis := Basis.IDENTITY) -> Interactable:
 	var it := Interactable.new()
 	it.name = node_name
+	it.prompt = prompt
 	it.action = action
 	it.collision_layer = G.PL_WORLD
 	it.collision_mask = 0
@@ -524,7 +553,7 @@ func light_switch(c: Vector3, side_normal: Vector3, lights: Array, glow_mats: Ar
 			gm.set_shader_parameter("emission_energy", 6.0 if state[0] else 0.0)
 		if G.sfx:
 			G.sfx.play_at("click", c, -2.0)
-	interactable(c, _bm(vis), M.trim, sz, "LightSwitch", act)
+	interactable(c, _bm(vis), M.trim, sz, "LightSwitch", "Flip light switch", act)
 
 
 func prop(kind: String, pos: Vector3, yaw := 0.0, color: Variant = null, sleep := true) -> Prop:
@@ -551,6 +580,7 @@ func prop_xf(kind: String, xf: Transform3D, color: Variant = null) -> Prop:
 func duck(pos: Vector3, yaw := 0.0) -> Prop:
 	var d := prop("duck", pos, yaw)
 	d.collectible = true
+	d.prompt = "Squeeze duck"
 	G.ducks_total += 1
 	return d
 
@@ -586,6 +616,9 @@ func _build_foyer() -> void:
 	pt.can_teleport = false
 	frame_around("w", mn, mx, o_w, M.gold, 0.16, 0.08)
 	blocker(Vector3(-4.07 - BLOCK_T * 0.5, 2.0, 0.0), Vector3(BLOCK_T, 2.0, 1.6))
+	box(Vector3(-3.985, 1.55, 1.25), Vector3(0.02, 0.16, 0.5), M.gold, false)
+	sign_label("Study of an Attic,", Vector3(-3.972, 1.575, 1.25), PI * 0.5, 16, Color(0.15, 0.1, 0.05))
+	sign_label("Sideways", Vector3(-3.972, 1.515, 1.25), PI * 0.5, 16, Color(0.15, 0.1, 0.05))
 	# console table under the painting
 	box(Vector3(-3.72, 0.775, 0.0), Vector3(0.5, 0.05, 1.7), M.dark_wood)
 	for z in [-0.78, 0.78]:
@@ -725,7 +758,7 @@ func _build_bedroom() -> void:
 		nl.visible = lamp_on[0]
 		shade_m.set_shader_parameter("emission_energy", 1.5 if lamp_on[0] else 0.0)
 		G.sfx.play_at("click", ns, -3.0)
-	interactable(ns + Vector3(0, 0.8, 0), _bm(Vector3(0.01, 0.01, 0.01)), M.trim, Vector3(0.36, 0.45, 0.36), "NightstandLamp", lamp_act)
+	interactable(ns + Vector3(0, 0.8, 0), _bm(Vector3(0.01, 0.01, 0.01)), M.trim, Vector3(0.36, 0.45, 0.36), "NightstandLamp", "Toggle lamp", lamp_act)
 	# dresser with a music box on top
 	box(Vector3(6.3, 0.45, 3.22), Vector3(1.4, 0.9, 0.5), M.dark_wood)
 	for row in 3:
@@ -1108,7 +1141,7 @@ func _ball_machine(base: Vector3) -> void:
 	var spout := base + Vector3(0, 6.9, 0)
 	var press := func():
 		_spawn_balls(spout)
-	interactable(bp + Vector3(0, 1.05, 0), m, M.button_red, Vector3(0.36, 0.14, 0.36), "BigRedButton", press)
+	interactable(bp + Vector3(0, 1.05, 0), m, M.button_red, Vector3(0.36, 0.14, 0.36), "BigRedButton", "Press the big red button", press)
 
 
 func _spawn_balls(at: Vector3) -> void:
@@ -1159,6 +1192,7 @@ func _bowling() -> void:
 			prop("pin", Vector3(83.5 - r * 0.15 + j * 0.3, 0.201, -14.5 - r * 0.26))
 	prop("bowling_ball", Vector3(83.2, 0.111, 16.5))
 	prop("bowling_ball", Vector3(83.8, 0.111, 16.5))
+	sign_label("BOWLING  (throw with right click)", Vector3(83.5, 1.9, 17.5), 0.0, 30)
 
 
 func _seesaw(c: Vector3) -> void:
