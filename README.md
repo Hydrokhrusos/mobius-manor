@@ -12,7 +12,7 @@ Everything — rooms, furniture, textures and sounds — is generated procedural
 | Room | What's wrong with it |
 |---|---|
 | The Foyer | The front door opens into the middle of a hall. The painting is a window into the attic — sideways. |
-| The Long Hallway | Its window looks down into the Great Hall from seven metres up. |
+| The Hallway | Its window looks down into the Great Hall from seven metres up. |
 | The Bedroom | The wardrobe is bigger on the inside. Much bigger. |
 | The Great Hall | A free-standing door frame: the front shows a sunny greenhouse, the back shows the foyer. Walk around it. |
 | The Room | The east door leads in through the west door. You can see yourself. |

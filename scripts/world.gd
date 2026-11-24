@@ -697,11 +697,11 @@ func _bench(c: Vector3, length: float) -> void:
 
 
 # =====================================================================================
-# The Long Hallway
+# The Hallway
 # =====================================================================================
 
 func _build_hallway() -> void:
-	_begin("The Long Hallway", Vector3(-12.3, -1.0, -7.7), Vector3(6.3, 4.0, -4.25))
+	_begin("The Hallway", Vector3(-12.3, -1.0, -7.7), Vector3(6.3, 4.0, -4.25))
 	var mn := Vector3(-12, 0, -7.4)
 	var mx := Vector3(6, 3.0, -4.4)
 	var o_s := op("s", 0.0, 1.4, 2.4)
